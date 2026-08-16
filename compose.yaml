@@ -1,0 +1,14 @@
+name: safety-guard-runner
+
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: safety-guard-runner:1.0
+    working_dir: /workspace/project
+    ipc: host
+    shm_size: "32gb"
+    gpus: all
+    volumes:
+      - .:/workspace/project

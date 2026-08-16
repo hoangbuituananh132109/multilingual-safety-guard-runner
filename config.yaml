@@ -1,0 +1,68 @@
+paths:
+  input_root: /workspace/project/input
+  work_root: /workspace/project/work
+  output_root: /workspace/project/output
+
+data:
+  nemotron_root: /workspace/project/input/nemotron
+  revision: a3f7ecb3433d1933701a83f18de16c36934a7f51
+  languages: [en, ar, de, es, fr, hi, ja, th, zh]
+  output_dir: /workspace/project/work/training
+
+benchmarks:
+  sea_root: /workspace/project/input/sea-helm
+  sea_revision: 9be3986d00185dc6d6ec362b71542ed29642a6be
+  sea_output: /workspace/project/work/sea/sea_safeguard_vi.jsonl
+  xsafety_root: /workspace/project/input/xsafety
+  xsafety_revision: 8c55b6a6cda594cd550a4921513238a2dd40eb5a
+  output_dir: /workspace/project/work/benchmarks
+  xsafety_languages: [en, ar, de, es, fr, hi, ja, zh]
+
+evaluation:
+  batch_size: 4
+  load_in_4bit: false
+  likelihood_field: text
+  likelihood_max_length: 2048
+  likelihood_stride: 1024
+
+training:
+  max_length: 2048
+  epochs: 5
+  learning_rate: 1.0e-5
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  lora_r: 8
+  lora_alpha: 32
+  lora_dropout: 0.0
+  per_device_batch_size: 4
+  gradient_accumulation_steps: 8
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_steps: 50
+  eval_steps: 50
+  save_total_limit: 3
+  seed: 3407
+  smoke_max_steps: 3
+  pilot_max_steps: 100
+
+models:
+  - name: llama31_8b
+    id: /workspace/project/input/models/llama31-8b-instruct
+    revision: null
+    family: nemotron
+    tuning: lora
+    target_modules: [q_proj, v_proj]
+
+  - name: qwen3_8b
+    id: /workspace/project/input/models/qwen3-8b
+    revision: null
+    family: nemotron
+    tuning: lora
+    target_modules: [q_proj, v_proj]
+
+  - name: qwen3_4b
+    id: /workspace/project/input/models/qwen3-4b
+    revision: null
+    family: nemotron
+    tuning: lora
+    target_modules: [q_proj, v_proj]
