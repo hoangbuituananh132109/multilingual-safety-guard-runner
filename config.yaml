@@ -1,21 +1,22 @@
 paths:
-  input_root: /workspace/project/input
-  work_root: /workspace/project/work
-  output_root: /workspace/project/output
+  zip_root: zip
+  input_root: input
+  work_root: work
+  runs_root: runs
 
 data:
-  nemotron_root: /workspace/project/input/nemotron
+  nemotron_root: input/nemotron
   revision: a3f7ecb3433d1933701a83f18de16c36934a7f51
   languages: [en, ar, de, es, fr, hi, ja, th, zh]
-  output_dir: /workspace/project/work/training
+  output_dir: work/training
 
 benchmarks:
-  sea_root: /workspace/project/input/sea-helm
+  sea_root: input/sea-helm
   sea_revision: 9be3986d00185dc6d6ec362b71542ed29642a6be
-  sea_output: /workspace/project/work/sea/sea_safeguard_vi.jsonl
-  xsafety_root: /workspace/project/input/xsafety
+  sea_output: work/sea/sea_safeguard_vi.jsonl
+  xsafety_root: input/xsafety
   xsafety_revision: 8c55b6a6cda594cd550a4921513238a2dd40eb5a
-  output_dir: /workspace/project/work/benchmarks
+  output_dir: work/benchmarks
   xsafety_languages: [en, ar, de, es, fr, hi, ja, zh]
 
 evaluation:
@@ -26,43 +27,59 @@ evaluation:
   likelihood_stride: 1024
 
 training:
-  max_length: 2048
-  epochs: 5
-  learning_rate: 1.0e-5
-  lr_scheduler_type: constant
-  warmup_ratio: 0.0
-  lora_r: 8
-  lora_alpha: 32
-  lora_dropout: 0.0
-  per_device_batch_size: 4
-  gradient_accumulation_steps: 8
-  gradient_checkpointing: true
-  logging_steps: 10
-  save_steps: 50
-  eval_steps: 50
-  save_total_limit: 3
-  seed: 3407
-  smoke_max_steps: 3
-  pilot_max_steps: 100
+  common:
+    max_length: 2048
+    lr_scheduler_type: constant
+    warmup_ratio: 0.0
+    gradient_checkpointing: true
+    logging_steps: 10
+    save_steps: 50
+    eval_steps: 50
+    save_total_limit: 3
+    seed: 3407
+    smoke_max_steps: 3
+    pilot_max_steps: 100
+  lora:
+    epochs: 5
+    learning_rate: 1.0e-5
+    per_device_batch_size: 4
+    gradient_accumulation_steps: 8
+    lora_r: 8
+    lora_alpha: 32
+    lora_dropout: 0.0
+  full:
+    epochs: 1
+    learning_rate: 1.0e-5
+    per_device_batch_size: 1
+    gradient_accumulation_steps: 32
 
 models:
   - name: llama31_8b
-    id: /workspace/project/input/models/llama31-8b-instruct
+    id: input/models/llama31-8b-instruct
     revision: null
     family: nemotron
-    tuning: lora
     target_modules: [q_proj, v_proj]
 
   - name: qwen3_8b
-    id: /workspace/project/input/models/qwen3-8b
+    id: input/models/qwen3-8b
     revision: null
     family: nemotron
-    tuning: lora
     target_modules: [q_proj, v_proj]
 
   - name: qwen3_4b
-    id: /workspace/project/input/models/qwen3-4b
+    id: input/models/qwen3-4b
     revision: null
     family: nemotron
-    tuning: lora
+    target_modules: [q_proj, v_proj]
+
+  - name: qwen3_1_7b
+    id: input/models/qwen3-1.7b
+    revision: null
+    family: nemotron
+    target_modules: [q_proj, v_proj]
+
+  - name: qwen3_0_6b
+    id: input/models/qwen3-0.6b
+    revision: null
+    family: nemotron
     target_modules: [q_proj, v_proj]

@@ -43,13 +43,17 @@ def nested_root(root: Path, marker: Path) -> Path:
 def selected_model(config: dict[str, Any], name: str) -> dict[str, Any]:
     models = {str(item["name"]): item for item in config["models"]}
     if name not in models:
-        raise ValueError(f"Unknown model: {name}")
+        raise ValueError(f"Unknown model: {name}. Available: {', '.join(models)}")
     return models[name]
 
 
 def revision_args(model: dict[str, Any]) -> list[str]:
     revision = model.get("revision")
     return ["--revision", str(revision)] if revision else []
+
+
+def run_root(config: dict[str, Any], model: dict[str, Any], method: str, mode: str) -> Path:
+    return Path(config["paths"]["runs_root"]) / str(model["name"]) / f"{method}_{mode}"
 
 
 def preflight(config: dict[str, Any], dry_run: bool) -> None:
@@ -59,7 +63,7 @@ def preflight(config: dict[str, Any], dry_run: bool) -> None:
     import torch
 
     if not torch.cuda.is_available():
-        raise RuntimeError("CUDA is not available")
+        raise RuntimeError("CUDA is not available inside the current Python environment")
     devices = []
     for index in range(torch.cuda.device_count()):
         devices.append({
@@ -72,7 +76,7 @@ def preflight(config: dict[str, Any], dry_run: bool) -> None:
     right = torch.randn((256, 256), device="cuda", dtype=torch.bfloat16)
     _ = left @ right
     torch.cuda.synchronize()
-    print(json.dumps({"torch": torch.__version__, "cuda_runtime": torch.version.cuda, "devices": devices, "bf16_matmul": "ok"}, indent=2))
+    print(json.dumps({"python": sys.executable, "torch": torch.__version__, "cuda_runtime": torch.version.cuda, "devices": devices, "bf16_matmul": "ok"}, indent=2))
 
 
 def prepare(config: dict[str, Any], limit: int, dry_run: bool) -> None:
@@ -124,20 +128,31 @@ def benchmark_args(config: dict[str, Any]) -> list[str]:
     return result
 
 
-def evaluate(config: dict[str, Any], model: dict[str, Any], stage: str, limit: int | None, dry_run: bool) -> None:
-    output = Path(config["paths"]["output_root"]) / f"eval_{stage}" / str(model["name"])
+def evaluation_source(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str) -> tuple[str, Path | None, Path, list[str]]:
+    if checkpoint == "before":
+        destination = Path(config["paths"]["runs_root"]) / str(model["name"]) / "base"
+        return str(model["id"]), None, destination, revision_args(model)
+    trained = run_root(config, model, method, mode)
+    final = trained / "final"
+    if method == "lora":
+        return str(model["id"]), final, trained, revision_args(model)
+    return str(final), None, trained, []
+
+
+def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, dry_run: bool) -> None:
+    base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     command = [
         sys.executable,
         str(CORE / "evaluate.py"),
-        "--base-model", str(model["id"]),
-        *revision_args(model),
+        "--base-model", base_model,
+        *revisions,
         "--family", str(model["family"]),
-        "--output-dir", str(output),
+        "--output-dir", str(destination / "guard"),
         "--batch-size", str(config["evaluation"]["batch_size"]),
         *benchmark_args(config),
     ]
-    if stage == "after":
-        command.extend(["--adapter", str(Path(config["paths"]["output_root"]) / "train" / str(model["name"]) / "final")])
+    if adapter is not None:
+        command.extend(["--adapter", str(adapter)])
     if config["evaluation"].get("load_in_4bit"):
         command.append("--load-in-4bit")
     if limit is not None:
@@ -145,23 +160,23 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], stage: str, limit: i
     execute(command, dry_run)
 
 
-def likelihood(config: dict[str, Any], model: dict[str, Any], stage: str, limit: int | None, dry_run: bool) -> None:
+def likelihood(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, dry_run: bool) -> None:
+    base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     benchmark = Path(config["benchmarks"]["output_dir"]) / "sea_safeguard_vi.jsonl"
-    output = Path(config["paths"]["output_root"]) / f"likelihood_{stage}" / str(model["name"])
     command = [
         sys.executable,
         str(CORE / "likelihood.py"),
-        "--base-model", str(model["id"]),
-        *revision_args(model),
+        "--base-model", base_model,
+        *revisions,
         "--benchmark", f"sea_vi={benchmark}",
-        "--output-dir", str(output),
+        "--output-dir", str(destination / "likelihood"),
         "--language", "vi",
         "--field", str(config["evaluation"]["likelihood_field"]),
         "--max-length", str(config["evaluation"]["likelihood_max_length"]),
         "--stride", str(config["evaluation"]["likelihood_stride"]),
     ]
-    if stage == "after":
-        command.extend(["--adapter", str(Path(config["paths"]["output_root"]) / "train" / str(model["name"]) / "final")])
+    if adapter is not None:
+        command.extend(["--adapter", str(adapter)])
     if config["evaluation"].get("load_in_4bit"):
         command.append("--load-in-4bit")
     if limit is not None:
@@ -169,28 +184,36 @@ def likelihood(config: dict[str, Any], model: dict[str, Any], stage: str, limit:
     execute(command, dry_run)
 
 
-def train(config: dict[str, Any], model: dict[str, Any], mode: str, resume: bool, dry_run: bool) -> None:
-    output = Path(config["paths"]["output_root"]) / "train" / str(model["name"])
-    settings = config["training"]
-    generated = {
-        "model": {
-            "id": model["id"],
-            "revision": model.get("revision"),
-            "family": model["family"],
-            "tuning": model["tuning"],
-            "attention": model.get("attention", "sdpa"),
-            "trust_remote_code": bool(model.get("trust_remote_code", False)),
+def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str, resume: bool, dry_run: bool) -> None:
+    output = run_root(config, model, method, mode)
+    common = dict(config["training"]["common"])
+    method_settings = dict(config["training"][method])
+    settings = {**common, **method_settings}
+    model_settings: dict[str, Any] = {
+        "id": model["id"],
+        "revision": model.get("revision"),
+        "family": model["family"],
+        "tuning": method,
+        "attention": model.get("attention", "sdpa"),
+        "trust_remote_code": bool(model.get("trust_remote_code", False)),
+    }
+    if method == "lora":
+        model_settings.update({
             "lora_r": int(settings["lora_r"]),
             "lora_alpha": int(settings["lora_alpha"]),
             "lora_dropout": float(settings["lora_dropout"]),
             "target_modules": list(model["target_modules"]),
-        },
+        })
+    training_settings = {key: value for key, value in settings.items() if key not in {"max_length", "smoke_max_steps", "pilot_max_steps", "lora_r", "lora_alpha", "lora_dropout"}}
+    generated = {
+        "run_name": f"{model['name']}-{method}-{mode}",
+        "model": model_settings,
         "data": {
             "train": str(Path(config["data"]["output_dir"]) / "train.jsonl"),
             "validation": str(Path(config["data"]["output_dir"]) / "valid.jsonl"),
             "max_length": int(settings["max_length"]),
         },
-        "training": {key: value for key, value in settings.items() if key not in {"max_length", "smoke_max_steps", "pilot_max_steps"}},
+        "training": training_settings,
         "output_dir": str(output),
     }
     generated_path = output / "train_config.yaml"
@@ -209,35 +232,53 @@ def train(config: dict[str, Any], model: dict[str, Any], mode: str, resume: bool
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=Path("/workspace/project/config.yaml"))
+    parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     parser.add_argument("--dry-run", action="store_true")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("preflight")
+    subparsers.add_parser("status")
+    unpack_parser = subparsers.add_parser("unpack")
+    unpack_parser.add_argument("--replace", action="store_true")
+    unpack_parser.add_argument("--strict", action="store_true")
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--limit", type=int, default=0)
-    for stage in ("evaluate", "likelihood"):
-        value = subparsers.add_parser(stage)
+    for command in ("evaluate", "likelihood"):
+        value = subparsers.add_parser(command)
         value.add_argument("--model", required=True)
         value.add_argument("--checkpoint", choices=["before", "after"], default="before")
+        value.add_argument("--method", choices=["lora", "full"], default="lora")
+        value.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
         value.add_argument("--limit", type=int)
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", required=True)
+    train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
     train_parser.add_argument("--mode", choices=["smoke", "pilot", "full"], default="smoke")
     train_parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
-    config = load_config(args.config)
+    config_path = args.config.resolve()
+    config = load_config(config_path)
+    os.chdir(config_path.parent)
     if args.command == "preflight":
         preflight(config, args.dry_run)
+    elif args.command == "status":
+        execute([sys.executable, str(ROOT / "status.py"), "--config", str(config_path)], args.dry_run)
+    elif args.command == "unpack":
+        command = [sys.executable, str(ROOT / "unpack_zips.py")]
+        if args.replace:
+            command.append("--replace")
+        if args.strict:
+            command.append("--strict")
+        execute(command, args.dry_run)
     elif args.command == "prepare":
         prepare(config, args.limit, args.dry_run)
     else:
         model = selected_model(config, args.model)
         if args.command == "evaluate":
-            evaluate(config, model, args.checkpoint, args.limit, args.dry_run)
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.dry_run)
         elif args.command == "likelihood":
-            likelihood(config, model, args.checkpoint, args.limit, args.dry_run)
+            likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.dry_run)
         elif args.command == "train":
-            train(config, model, args.mode, args.resume, args.dry_run)
+            train(config, model, args.method, args.mode, args.resume, args.dry_run)
 
 
 if __name__ == "__main__":

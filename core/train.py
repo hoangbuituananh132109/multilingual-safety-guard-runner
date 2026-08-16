@@ -14,6 +14,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from prompt import N23, render_prompt
 
+
 def target_text(row: dict[str, Any], family: str) -> str:
     label = str(row["safety_label"])
     if family == "qwen_binary":
@@ -84,6 +85,16 @@ def main() -> None:
     output = Path(cfg["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
     (output / "resolved_config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    total_parameters = sum(parameter.numel() for parameter in model.parameters())
+    trainable_parameters = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+    parameter_report = {
+        "method": tuning,
+        "total_parameters": total_parameters,
+        "trainable_parameters": trainable_parameters,
+        "trainable_percent": 100.0 * trainable_parameters / total_parameters,
+    }
+    (output / "trainable_parameters.json").write_text(json.dumps(parameter_report, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(parameter_report, indent=2))
     training_args = TrainingArguments(
         output_dir=str(output), run_name=cfg["run_name"], num_train_epochs=float(train_cfg["epochs"]), max_steps=args.max_steps,
         per_device_train_batch_size=int(train_cfg["per_device_batch_size"]), per_device_eval_batch_size=int(train_cfg["per_device_batch_size"]),
@@ -92,14 +103,14 @@ def main() -> None:
         gradient_checkpointing=bool(train_cfg["gradient_checkpointing"]), gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=int(train_cfg["logging_steps"]), save_steps=int(train_cfg["save_steps"]), eval_steps=int(train_cfg["eval_steps"]),
         eval_strategy="steps", save_strategy="steps", save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
-        report_to=["tensorboard"], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=False,
+        report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=False,
         remove_unused_columns=False, label_names=["labels"], save_safetensors=True,
     )
     trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=tokenized["validation"], data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
     resume = True if args.resume == "auto" else args.resume
     result = trainer.train(resume_from_checkpoint=resume)
     trainer.save_model(str(output / "final"))
-    tokenizer.save_pretrained(output / "final" / "tokenizer")
+    tokenizer.save_pretrained(output / "final")
     trainer.save_metrics("train", result.metrics)
     trainer.save_state()
 
