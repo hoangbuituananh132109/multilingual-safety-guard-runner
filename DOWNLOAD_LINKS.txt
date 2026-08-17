@@ -1,0 +1,90 @@
+DOWNLOAD LINKS AND DESTINATIONS
+
+Place Nemotron JSONL files directly under input/nemotron/.
+
+input/nemotron/en/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/en/train.jsonl?download=true
+input/nemotron/en/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/en/valid.jsonl?download=true
+input/nemotron/en/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/en/test.jsonl?download=true
+
+input/nemotron/ar/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/ar/train.jsonl?download=true
+input/nemotron/ar/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/ar/valid.jsonl?download=true
+input/nemotron/ar/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/ar/test.jsonl?download=true
+
+input/nemotron/de/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/de/train.jsonl?download=true
+input/nemotron/de/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/de/valid.jsonl?download=true
+input/nemotron/de/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/de/test.jsonl?download=true
+
+input/nemotron/es/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/es/train.jsonl?download=true
+input/nemotron/es/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/es/valid.jsonl?download=true
+input/nemotron/es/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/es/test.jsonl?download=true
+
+input/nemotron/fr/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/fr/train.jsonl?download=true
+input/nemotron/fr/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/fr/valid.jsonl?download=true
+input/nemotron/fr/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/fr/test.jsonl?download=true
+
+input/nemotron/hi/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/hi/train.jsonl?download=true
+input/nemotron/hi/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/hi/valid.jsonl?download=true
+input/nemotron/hi/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/hi/test.jsonl?download=true
+
+input/nemotron/ja/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/ja/train.jsonl?download=true
+input/nemotron/ja/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/ja/valid.jsonl?download=true
+input/nemotron/ja/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/ja/test.jsonl?download=true
+
+input/nemotron/th/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/th/train.jsonl?download=true
+input/nemotron/th/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/th/valid.jsonl?download=true
+input/nemotron/th/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/th/test.jsonl?download=true
+
+input/nemotron/zh/train.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/zh/train.jsonl?download=true
+input/nemotron/zh/valid.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/zh/valid.jsonl?download=true
+input/nemotron/zh/test.jsonl
+https://huggingface.co/datasets/nvidia/Nemotron-Safety-Guard-Dataset-v3/resolve/a3f7ecb3433d1933701a83f18de16c36934a7f51/zh/test.jsonl?download=true
+
+SEA-HELM ZIP
+Place in zip/sea-helm.zip, then run python run.py unpack.
+https://github.com/aisingapore/SEA-HELM/archive/9be3986d00185dc6d6ec362b71542ed29642a6be.zip
+
+XSAFETY ZIP
+Place in zip/xsafety.zip, then run python run.py unpack.
+https://github.com/Jarviswang94/Multilingual_safety_benchmark/archive/8c55b6a6cda594cd550a4921513238a2dd40eb5a.zip
+
+QWEN MODEL SNAPSHOTS
+Download each snapshot, make a ZIP with one top-level model folder, place it in zip/, then run python run.py unpack.
+
+zip/qwen3-0.6b.zip
+https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca
+zip/qwen3-1.7b.zip
+https://huggingface.co/Qwen/Qwen3-1.7B/tree/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e
+zip/qwen3-4b.zip
+https://huggingface.co/Qwen/Qwen3-4B/tree/1cfa9a7208912126459214e8b04321603b3df60c
+zip/qwen3-8b.zip
+https://huggingface.co/Qwen/Qwen3-8B/tree/b968826d9c46dd6066d109eabc6255188de91218
+
+LLAMA SNAPSHOT
+Place an authorized snapshot in zip/llama31-8b-instruct.zip, then run python run.py unpack.
+https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
