@@ -237,6 +237,10 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("preflight")
     subparsers.add_parser("status")
+    compare_parser = subparsers.add_parser("compare")
+    compare_parser.add_argument("--checkpoint", choices=["before", "after"], default="before")
+    compare_parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    compare_parser.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
     unpack_parser = subparsers.add_parser("unpack")
     unpack_parser.add_argument("--replace", action="store_true")
     unpack_parser.add_argument("--strict", action="store_true")
@@ -262,6 +266,11 @@ def main() -> None:
         preflight(config, args.dry_run)
     elif args.command == "status":
         execute([sys.executable, str(ROOT / "status.py"), "--config", str(config_path)], args.dry_run)
+    elif args.command == "compare":
+        command = [sys.executable, str(ROOT / "compare_models.py"), "--config", str(config_path), "--checkpoint", args.checkpoint]
+        if args.checkpoint == "after":
+            command.extend(["--method", args.method, "--run-mode", args.run_mode])
+        execute(command, args.dry_run)
     elif args.command == "unpack":
         command = [sys.executable, str(ROOT / "unpack_zips.py")]
         if args.replace:
