@@ -47,6 +47,22 @@ def selected_model(config: dict[str, Any], name: str) -> dict[str, Any]:
     return models[name]
 
 
+def model_id(config: dict[str, Any], model: dict[str, Any]) -> str:
+    """Resolve the base-model path/id for a model.
+
+    Precedence:
+      1. Env var MODEL_PATH_<NAME_UPPER> (e.g. MODEL_PATH_QWEN3_8B) - lets a
+         company machine point at an existing local model directory without
+         committing that path to git.
+      2. The `id` field in config.yaml.
+    """
+    env_key = "MODEL_PATH_" + str(model["name"]).upper()
+    override = os.environ.get(env_key)
+    if override:
+        return override
+    return str(model["id"])
+
+
 def revision_args(model: dict[str, Any]) -> list[str]:
     revision = model.get("revision")
     return ["--revision", str(revision)] if revision else []
@@ -131,11 +147,11 @@ def benchmark_args(config: dict[str, Any]) -> list[str]:
 def evaluation_source(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str) -> tuple[str, Path | None, Path, list[str]]:
     if checkpoint == "before":
         destination = Path(config["paths"]["runs_root"]) / str(model["name"]) / "base"
-        return str(model["id"]), None, destination, revision_args(model)
+        return model_id(config, model), None, destination, revision_args(model)
     trained = run_root(config, model, method, mode)
     final = trained / "final"
     if method == "lora":
-        return str(model["id"]), final, trained, revision_args(model)
+        return model_id(config, model), final, trained, revision_args(model)
     return str(final), None, trained, []
 
 
@@ -190,7 +206,7 @@ def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str,
     method_settings = dict(config["training"][method])
     settings = {**common, **method_settings}
     model_settings: dict[str, Any] = {
-        "id": model["id"],
+        "id": model_id(config, model),
         "revision": model.get("revision"),
         "family": model["family"],
         "tuning": method,
