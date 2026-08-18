@@ -155,7 +155,7 @@ def evaluation_source(config: dict[str, Any], model: dict[str, Any], checkpoint:
     return str(final), None, trained, []
 
 
-def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, dry_run: bool) -> None:
+def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool) -> None:
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     command = [
         sys.executable,
@@ -173,10 +173,12 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         command.append("--load-in-4bit")
     if limit is not None:
         command.extend(["--limit", str(limit)])
+    if sample is not None:
+        command.extend(["--sample", str(sample)])
     execute(command, dry_run)
 
 
-def likelihood(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, dry_run: bool) -> None:
+def likelihood(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool) -> None:
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     benchmark = Path(config["benchmarks"]["output_dir"]) / "sea_safeguard_vi.jsonl"
     command = [
@@ -197,6 +199,8 @@ def likelihood(config: dict[str, Any], model: dict[str, Any], checkpoint: str, m
         command.append("--load-in-4bit")
     if limit is not None:
         command.extend(["--limit", str(limit)])
+    if sample is not None:
+        command.extend(["--sample", str(sample)])
     execute(command, dry_run)
 
 
@@ -269,6 +273,7 @@ def main() -> None:
         value.add_argument("--method", choices=["lora", "full"], default="lora")
         value.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
         value.add_argument("--limit", type=int)
+        value.add_argument("--sample", type=int)
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", required=True)
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -299,9 +304,9 @@ def main() -> None:
     else:
         model = selected_model(config, args.model)
         if args.command == "evaluate":
-            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.dry_run)
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "likelihood":
-            likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.dry_run)
+            likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":
             train(config, model, args.method, args.mode, args.resume, args.dry_run)
 

@@ -95,17 +95,22 @@ def main() -> None:
     }
     (output / "trainable_parameters.json").write_text(json.dumps(parameter_report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(parameter_report, indent=2))
-    training_args = TrainingArguments(
+    import inspect as _inspect
+    from transformers import TrainingArguments as _TA
+    _sig_params = set(_inspect.signature(_TA.__init__).parameters)
+    _ta_kwargs = dict(
         output_dir=str(output), run_name=cfg["run_name"], num_train_epochs=float(train_cfg["epochs"]), max_steps=args.max_steps,
         per_device_train_batch_size=int(train_cfg["per_device_batch_size"]), per_device_eval_batch_size=int(train_cfg["per_device_batch_size"]),
         gradient_accumulation_steps=int(train_cfg["gradient_accumulation_steps"]), learning_rate=float(train_cfg["learning_rate"]),
-        lr_scheduler_type=train_cfg["lr_scheduler_type"], warmup_ratio=float(train_cfg["warmup_ratio"]), bf16=True, tf32=True,
+        lr_scheduler_type=train_cfg["lr_scheduler_type"], lr_scheduler_kwargs={"warmup_ratio": float(train_cfg["warmup_ratio"])}, bf16=True, tf32=True,
         gradient_checkpointing=bool(train_cfg["gradient_checkpointing"]), gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=int(train_cfg["logging_steps"]), save_steps=int(train_cfg["save_steps"]), eval_steps=int(train_cfg["eval_steps"]),
         eval_strategy="steps", save_strategy="steps", save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
         report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=False,
         remove_unused_columns=False, label_names=["labels"], save_safetensors=True,
     )
+    _ta_kwargs = {k: v for k, v in _ta_kwargs.items() if k in _sig_params}
+    training_args = _TA(**_ta_kwargs)
     trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=tokenized["validation"], data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
     resume = True if args.resume == "auto" else args.resume
     result = trainer.train(resume_from_checkpoint=resume)

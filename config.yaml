@@ -3,13 +3,20 @@ paths:
   input_root: input
   work_root: work
   runs_root: runs
-
 data:
   nemotron_root: input/nemotron
   revision: a3f7ecb3433d1933701a83f18de16c36934a7f51
-  languages: [en, ar, de, es, fr, hi, ja, th, zh]
+  languages:
+  - en
+  - ar
+  - de
+  - es
+  - fr
+  - hi
+  - ja
+  - th
+  - zh
   output_dir: work/training
-
 benchmarks:
   sea_root: input/sea-helm
   sea_revision: 9be3986d00185dc6d6ec362b71542ed29642a6be
@@ -17,15 +24,21 @@ benchmarks:
   xsafety_root: input/xsafety
   xsafety_revision: 8c55b6a6cda594cd550a4921513238a2dd40eb5a
   output_dir: work/benchmarks
-  xsafety_languages: [en, ar, de, es, fr, hi, ja, zh]
-
+  xsafety_languages:
+  - en
+  - ar
+  - de
+  - es
+  - fr
+  - hi
+  - ja
+  - zh
 evaluation:
   batch_size: 4
   load_in_4bit: false
   likelihood_field: text
   likelihood_max_length: 2048
   likelihood_stride: 1024
-
 training:
   common:
     max_length: 2048
@@ -41,7 +54,7 @@ training:
     pilot_max_steps: 100
   lora:
     epochs: 5
-    learning_rate: 1.0e-5
+    learning_rate: 1.0e-05
     per_device_batch_size: 4
     gradient_accumulation_steps: 8
     lora_r: 8
@@ -49,37 +62,70 @@ training:
     lora_dropout: 0.0
   full:
     epochs: 1
-    learning_rate: 1.0e-5
+    learning_rate: 1.0e-05
     per_device_batch_size: 1
     gradient_accumulation_steps: 32
-
 models:
-  - name: llama31_8b
-    id: input/models/llama31-8b-instruct
-    revision: null
-    family: nemotron
-    target_modules: [q_proj, v_proj]
-
-  - name: qwen3_8b
-    id: input/models/qwen3-8b
-    revision: null
-    family: nemotron
-    target_modules: [q_proj, v_proj]
-
-  - name: qwen3_4b
-    id: input/models/qwen3-4b
-    revision: null
-    family: nemotron
-    target_modules: [q_proj, v_proj]
-
-  - name: qwen3_1_7b
-    id: input/models/qwen3-1.7b
-    revision: null
-    family: nemotron
-    target_modules: [q_proj, v_proj]
-
-  - name: qwen3_0_6b
-    id: input/models/qwen3-0.6b
-    revision: null
-    family: nemotron
-    target_modules: [q_proj, v_proj]
+- name: llama31_8b
+  id: meta-llama/Llama-3.1-8B-Instruct
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: qwen3_8b
+  id: Qwen/Qwen3-8B
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: qwen3_4b
+  id: Qwen/Qwen3-4B
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: qwen3_1_7b
+  id: Qwen/Qwen3-1.7B
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: qwen3_0_6b
+  id: Qwen/Qwen3-0.6B
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: qwen35_4b
+  id: Qwen/Qwen3.5-4B
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: gemma3_4b_it
+  id: google/gemma-3-4b-it
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: llama31_8b_instruct
+  id: meta-llama/Llama-3.1-8B-Instruct
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
+- name: llama31_nemotron
+  id: nvidia/Llama-3.1-Nemotron-Safety-Guard-8B-v3
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj

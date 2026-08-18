@@ -138,6 +138,7 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--sample", type=int, help="Stratified random sample of N rows per benchmark (by language+view, fixed seed)")
     parser.add_argument("--parse-error-policy", choices=["incorrect", "unsafe", "exclude"], default="incorrect")
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +159,25 @@ def main() -> None:
     for specification in args.benchmark:
         name, path_text = specification.split("=", 1)
         rows = read_jsonl(Path(path_text))
-        if args.limit:
+        if args.sample:
+            import random as _random
+            _rng = _random.Random(3407)
+            groups: dict[tuple, list] = {}
+            for row in rows:
+                key = (str(row.get("language", "")), str(row.get("view", "")))
+                groups.setdefault(key, []).append(row)
+            sampled = []
+            for key, members in groups.items():
+                _rng.shuffle(members)
+                n = max(1, round(args.sample * len(members) / len(rows))) if len(rows) else 0
+                sampled.extend(members[:n])
+            # fill remainder to reach exactly args.sample
+            if len(sampled) < args.sample:
+                pool = [r for r in rows if r not in sampled]
+                _rng.shuffle(pool)
+                sampled.extend(pool[: args.sample - len(sampled)])
+            rows = sampled[:args.sample]
+        elif args.limit:
             rows = rows[:args.limit]
         for start in range(0, len(rows), args.batch_size):
             batch_rows = rows[start:start + args.batch_size]
