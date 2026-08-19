@@ -241,6 +241,9 @@ def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str,
         output.mkdir(parents=True, exist_ok=True)
         generated_path.write_text(yaml.safe_dump(generated, sort_keys=False), encoding="utf-8")
     command = [sys.executable, str(CORE / "train.py"), "--config", str(generated_path)]
+    # Skip eval during training by default: eval on the full valid set is very
+    # expensive and makes training look stuck. Run eval separately afterwards.
+    command.append("--skip-eval")
     if mode == "smoke":
         command.extend(["--max-steps", str(settings["smoke_max_steps"])])
     elif mode == "pilot":
