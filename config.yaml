@@ -108,6 +108,13 @@ models:
   target_modules:
   - q_proj
   - v_proj
+- name: qwen35_2b
+  id: Qwen/Qwen3.5-2B
+  revision: null
+  family: nemotron
+  target_modules:
+  - q_proj
+  - v_proj
 - name: gemma3_4b_it
   id: google/gemma-3-4b-it
   revision: null
