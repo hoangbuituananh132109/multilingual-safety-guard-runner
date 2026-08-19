@@ -53,7 +53,7 @@ training:
     smoke_max_steps: 3
     pilot_max_steps: 100
   lora:
-    epochs: 5
+    epochs: 1
     learning_rate: 1.0e-05
     per_device_batch_size: 4
     gradient_accumulation_steps: 8
