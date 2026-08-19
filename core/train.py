@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,49 @@ import torch
 import yaml
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, DataCollatorForSeq2Seq, Trainer, TrainingArguments
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    DataCollatorForSeq2Seq,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
+)
 
 from prompt import N23, render_prompt
+
+
+def log(message: str) -> None:
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[train] {stamp} {message}", flush=True)
+
+
+def vram_mb() -> str:
+    if not torch.cuda.is_available():
+        return "cpu"
+    allocated = torch.cuda.memory_allocated() / (1024 * 1024)
+    reserved = torch.cuda.memory_reserved() / (1024 * 1024)
+    return f"alloc={allocated:.0f}MB reserved={reserved:.0f}MB"
+
+
+class StepLogger(TrainerCallback):
+    """Log every optimizer step with elapsed time and VRAM usage."""
+
+    def __init__(self) -> None:
+        self.last_step = 0
+        self.step_start = time.time()
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        if state.global_step != self.last_step:
+            self.last_step = state.global_step
+            self.step_start = time.time()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        elapsed = time.time() - self.step_start
+        log(f"step={state.global_step} elapsed_since_last={elapsed:.1f}s {vram_mb()} logs={json.dumps(logs)}")
 
 
 def target_text(row: dict[str, Any], family: str) -> str:
@@ -36,14 +77,20 @@ def main() -> None:
     args = parser.parse_args()
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     model_cfg, data_cfg, train_cfg = cfg["model"], cfg["data"], cfg["training"]
+    log(f"config loaded from {args.config}")
+    log(f"model_id={model_cfg['id']} tuning={model_cfg['tuning']} family={model_cfg['family']} attention={model_cfg.get('attention', 'sdpa')}")
+    log(f"train={data_cfg['train']} validation={data_cfg['validation']} max_length={data_cfg['max_length']}")
+    log(f"epochs={train_cfg['epochs']} lr={train_cfg['learning_rate']} batch={train_cfg['per_device_batch_size']} grad_accum={train_cfg['gradient_accumulation_steps']} max_steps={args.max_steps}")
     if model_cfg["tuning"] == "qlora" and os.environ.get("ACCELERATE_USE_DEEPSPEED") == "true":
         raise ValueError("QLoRA is intentionally restricted to single GPU/DDP here; use LoRA/full for DeepSpeed ZeRO.")
 
+    log("loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
         model_cfg.get("tokenizer_id", model_cfg["id"]),
         revision=model_cfg.get("revision", "main"),
         trust_remote_code=model_cfg.get("trust_remote_code", False),
     )
+    log(f"tokenizer loaded ({type(tokenizer).__name__}), vocab={getattr(tokenizer, 'vocab_size', '?')}")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -54,16 +101,24 @@ def main() -> None:
     load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation=model_cfg.get("attention", "sdpa"), trust_remote_code=model_cfg.get("trust_remote_code", False), quantization_config=quant)
     if quant is not None:
         load_kwargs["device_map"] = {"": int(os.environ.get("LOCAL_RANK", "0"))}
+    log(f"loading base model from {model_cfg['id']} (dtype=bf16, attention={load_kwargs['attn_implementation']})...")
+    load_start = time.time()
     model = AutoModelForCausalLM.from_pretrained(
         model_cfg["id"], revision=model_cfg.get("revision", "main"), **load_kwargs
     )
+    log(f"base model loaded in {time.time() - load_start:.1f}s, {vram_mb()}")
     model.config.use_cache = False
     if tuning == "qlora":
+        log("preparing model for k-bit training...")
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=train_cfg.get("gradient_checkpointing", True))
     if tuning in {"lora", "qlora"}:
+        log(f"wrapping model with LoRA (r={model_cfg['lora_r']}, alpha={model_cfg['lora_alpha']}, dropout={model_cfg['lora_dropout']}, modules={model_cfg['target_modules']})...")
         model = get_peft_model(model, LoraConfig(r=int(model_cfg["lora_r"]), lora_alpha=int(model_cfg["lora_alpha"]), lora_dropout=float(model_cfg["lora_dropout"]), target_modules=list(model_cfg["target_modules"]), bias="none", task_type="CAUSAL_LM"))
+        log(f"LoRA applied, {vram_mb()}")
 
+    log("loading dataset...")
     raw = load_dataset("json", data_files={"train": data_cfg["train"], "validation": data_cfg["validation"]})
+    log(f"dataset loaded: train={len(raw['train'])} validation={len(raw['validation'])}")
     allowed = {"P", "PR"}
     if any(view not in allowed for view in set(raw["train"]["view"])):
         raise ValueError("Clean contract violation: only P/PR are allowed; response-only R is forbidden.")
@@ -81,7 +136,10 @@ def main() -> None:
         ids = prompt_ids + target_ids
         return {"input_ids": ids, "attention_mask": [1] * len(ids), "labels": [-100] * len(prompt_ids) + target_ids}
 
+    log("tokenizing dataset (may take a few minutes)...")
+    tokenize_start = time.time()
     tokenized = raw.map(tokenize, remove_columns=raw["train"].column_names, num_proc=max(1, min(8, os.cpu_count() or 1)), desc="Tokenizing completion-only safety targets")
+    log(f"tokenization done in {time.time() - tokenize_start:.1f}s")
     output = Path(cfg["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
     (output / "resolved_config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -95,6 +153,7 @@ def main() -> None:
     }
     (output / "trainable_parameters.json").write_text(json.dumps(parameter_report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(parameter_report, indent=2))
+    log(f"trainable params: {trainable_parameters:,} ({parameter_report['trainable_percent']:.4f}%)")
     import inspect as _inspect
     from transformers import TrainingArguments as _TA
     _sig_params = set(_inspect.signature(_TA.__init__).parameters)
@@ -111,13 +170,20 @@ def main() -> None:
     )
     _ta_kwargs = {k: v for k, v in _ta_kwargs.items() if k in _sig_params}
     training_args = _TA(**_ta_kwargs)
+    log("building Trainer...")
     trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=tokenized["validation"], data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
+    trainer.add_callback(StepLogger())
     resume = True if args.resume == "auto" else args.resume
+    log(f"starting training (resume={resume})...")
+    train_start = time.time()
     result = trainer.train(resume_from_checkpoint=resume)
+    log(f"training finished in {time.time() - train_start:.1f}s")
+    log("saving model...")
     trainer.save_model(str(output / "final"))
     tokenizer.save_pretrained(output / "final")
     trainer.save_metrics("train", result.metrics)
     trainer.save_state()
+    log(f"model saved to {output / 'final'}")
 
 
 if __name__ == "__main__":
