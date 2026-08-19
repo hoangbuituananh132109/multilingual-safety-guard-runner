@@ -17,7 +17,6 @@ export MODEL_PATH_LLAMA31_8B=/workspace/storage-shared/models/Llama-3.1-8B-Instr
 export MODEL_PATH_LLAMA31_NEMOTRON=/workspace/storage-shared/nlp/huypq51/models/Llama-3.1-Nemotron-Safety-Guard-8B-v3
 
 # Qwen3.5 family
-export MODEL_PATH_QWEN35_4B=/workspace/storage-shared/models/Qwen3.5-4B-Base
-export MODEL_PATH_QWEN35_2B=/workspace/storage-shared/models/Qwen3.5-2B
+export MODEL_PATH_QWEN35_4B=/workspace/storage-shared/models/Qwen3.5-4B
 
 echo 'ml_env loaded'
