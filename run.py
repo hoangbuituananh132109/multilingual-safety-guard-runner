@@ -155,8 +155,33 @@ def evaluation_source(config: dict[str, Any], model: dict[str, Any], checkpoint:
     return str(final), None, trained, []
 
 
+
+def merged_adapter_path(base_model: str, adapter: Path, runs_root: Path, model_name: str, method: str, mode: str) -> Path:
+    """Return (and lazily create) a merged weights dir for a LoRA adapter.
+
+    vLLM cannot load a PeftModel directly, so for after+lora eval we merge the
+    adapter into the base weights once and point vLLM at the merged dir.
+    """
+    merged = runs_root / model_name / f"{method}_{mode}" / "merged"
+    marker = merged / "merge_manifest.json"
+    if marker.is_file():
+        return merged
+    print(f"merging LoRA adapter {adapter} into {merged} for vLLM eval...", flush=True)
+    execute([
+        sys.executable,
+        str(ROOT / "merge_adapter.py"),
+        "--base-model", base_model,
+        "--adapter", str(adapter),
+        "--output", str(merged),
+    ], dry_run=False)
+    return merged
+
 def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers") -> None:
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
+    if backend == "vllm" and adapter is not None:
+        merged = merged_adapter_path(base_model, adapter, Path(config["paths"]["runs_root"]), str(model["name"]), method, mode)
+        base_model = str(merged)
+        adapter = None
     command = [
         sys.executable,
         str(CORE / "evaluate.py"),

@@ -61,9 +61,13 @@ python core/evaluate.py --base-model /path/to/model --family nemotron \
 - likelihood/BPB still uses transformers (vLLM does not expose per-token NLL).
 - Works with Qwen3, Qwen3.5 (multimodal text-only), Llama-3.1 via `AutoModelForCausalLM` + nemotron prompt.
 
-## Limitation: LoRA adapters
-- vLLM backend loads `args.base_model` directly and does NOT apply a LoRA adapter.
-- For post-training eval (`--checkpoint after --method lora`), either:
-  - merge the adapter into the base weights first, then point `--base-model` at the merged dir, or
-  - keep using the transformers backend for LoRA eval.
-- `before` checkpoint eval works fine with vLLM.
+## LoRA adapters (after-training eval with vLLM)
+- vLLM cannot load a `PeftModel` directly. For post-training eval
+  (`--checkpoint after --method lora --backend vllm`), `run.py` now auto-merges
+  the adapter into the base weights once (into `runs/<model>/<method>_<mode>/merged`)
+  and points vLLM at the merged dir. Merge is cached; re-runs reuse it.
+- Manual merge (also used for the Nemotron `lora_adapter`):
+  ```bash
+  python merge_adapter.py --base-model <BASE> --adapter <ADAPTER_DIR> --output <OUT_DIR>
+  ```
+- `before` checkpoint eval works fine with vLLM (no adapter).

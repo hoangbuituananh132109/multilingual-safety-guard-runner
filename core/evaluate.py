@@ -127,6 +127,7 @@ def stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "balanced_accuracy": balanced_accuracy_score(y, p) if y and has_both_classes else None,
         "macro_f1": f1_score(y, p, average="macro", zero_division=0) if y and has_both_classes else None,
         "unsafe_f1": f1_score(y, p, pos_label=1, average="binary", zero_division=0) if y else None,
+        "harmful_f1": f1_score(y, p, pos_label=1, average="binary", zero_division=0) if y else None,
         "unsafe_precision": precision_score(y, p, zero_division=0) if y else None,
         "unsafe_recall": recall_score(y, p, zero_division=0) if y else None,
         "parsed_only_accuracy": accuracy_score(valid_y, valid_p) if valid_y else None,
