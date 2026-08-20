@@ -253,6 +253,53 @@ def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str,
     execute(command, dry_run)
 
 
+def train_qwen35(config: dict[str, Any], model: dict[str, Any], method: str, mode: str, resume: bool, dry_run: bool) -> None:
+    """Train a multimodal Qwen3.5-4B text-only via the standalone trainer."""
+    output = run_root(config, model, method, mode)
+    common = dict(config["training"]["common"])
+    method_settings = dict(config["training"][method])
+    settings = {**common, **method_settings}
+    model_settings: dict[str, Any] = {
+        "id": model_id(config, model),
+        "revision": model.get("revision"),
+        "family": model["family"],
+        "tuning": method,
+        "attention": model.get("attention", "sdpa"),
+        "trust_remote_code": bool(model.get("trust_remote_code", False)),
+    }
+    if method == "lora":
+        model_settings.update({
+            "lora_r": int(settings["lora_r"]),
+            "lora_alpha": int(settings["lora_alpha"]),
+            "lora_dropout": float(settings["lora_dropout"]),
+            "target_modules": list(model["target_modules"]),
+        })
+    training_settings = {key: value for key, value in settings.items() if key not in {"max_length", "smoke_max_steps", "pilot_max_steps", "lora_r", "lora_alpha", "lora_dropout"}}
+    generated = {
+        "run_name": f"{model['name']}-{method}-{mode}",
+        "model": model_settings,
+        "data": {
+            "train": str(Path(config["data"]["output_dir"]) / "train.jsonl"),
+            "validation": str(Path(config["data"]["output_dir"]) / "valid.jsonl"),
+            "max_length": int(settings["max_length"]),
+        },
+        "training": training_settings,
+        "output_dir": str(output),
+    }
+    generated_path = output / "train_config.yaml"
+    if not dry_run:
+        output.mkdir(parents=True, exist_ok=True)
+        generated_path.write_text(yaml.safe_dump(generated, sort_keys=False), encoding="utf-8")
+    command = [sys.executable, str(ROOT / "train_qwen35.py"), "--config", str(generated_path)]
+    if mode == "smoke":
+        command.extend(["--max-steps", str(settings["smoke_max_steps"])])
+    elif mode == "pilot":
+        command.extend(["--max-steps", str(settings["pilot_max_steps"])])
+    if resume:
+        command.append("--resume")
+    execute(command, dry_run)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
@@ -282,6 +329,11 @@ def main() -> None:
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
     train_parser.add_argument("--mode", choices=["smoke", "pilot", "full"], default="smoke")
     train_parser.add_argument("--resume", action="store_true")
+    train35_parser = subparsers.add_parser("train_qwen35")
+    train35_parser.add_argument("--model", required=True)
+    train35_parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    train35_parser.add_argument("--mode", choices=["smoke", "pilot", "full"], default="smoke")
+    train35_parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     config_path = args.config.resolve()
     config = load_config(config_path)
@@ -312,6 +364,8 @@ def main() -> None:
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":
             train(config, model, args.method, args.mode, args.resume, args.dry_run)
+        elif args.command == "train_qwen35":
+            train_qwen35(config, model, args.method, args.mode, args.resume, args.dry_run)
 
 
 if __name__ == "__main__":
