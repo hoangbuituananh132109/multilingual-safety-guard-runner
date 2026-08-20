@@ -20,3 +20,6 @@ export MODEL_PATH_LLAMA31_NEMOTRON=/workspace/storage-shared/nlp/huypq51/models/
 export MODEL_PATH_QWEN35_4B=/workspace/storage-shared/models/Qwen3.5-4B
 
 echo 'ml_env loaded'
+
+# Qwen3.5-9B (added for BPB/PPL + vLLM eval)
+export MODEL_PATH_QWEN35_9B=/workspace/storage-shared/models/Qwen3.5-9B

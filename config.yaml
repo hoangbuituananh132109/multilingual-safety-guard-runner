@@ -34,6 +34,7 @@ benchmarks:
   - ja
   - zh
 evaluation:
+  backend: transformers
   batch_size: 4
   load_in_4bit: false
   likelihood_field: text

@@ -155,7 +155,7 @@ def evaluation_source(config: dict[str, Any], model: dict[str, Any], checkpoint:
     return str(final), None, trained, []
 
 
-def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool) -> None:
+def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers") -> None:
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     command = [
         sys.executable,
@@ -165,6 +165,7 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         "--family", str(model["family"]),
         "--output-dir", str(destination / "guard"),
         "--batch-size", str(config["evaluation"]["batch_size"]),
+        "--backend", backend,
         *benchmark_args(config),
     ]
     if adapter is not None:
@@ -324,6 +325,8 @@ def main() -> None:
         value.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
         value.add_argument("--limit", type=int)
         value.add_argument("--sample", type=int)
+        if command == "evaluate":
+            value.add_argument("--backend", choices=["transformers", "vllm"], default="transformers")
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", required=True)
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -359,7 +362,7 @@ def main() -> None:
     else:
         model = selected_model(config, args.model)
         if args.command == "evaluate":
-            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, getattr(args, "backend", "transformers"))
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":

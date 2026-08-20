@@ -143,6 +143,7 @@ def main() -> None:
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--load-in-4bit", action="store_true")
+    parser.add_argument("--backend", choices=["transformers", "vllm"], default="transformers")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--sample", type=int, help="Stratified random sample of N rows per benchmark (by language+view, fixed seed)")
     parser.add_argument("--parse-error-policy", choices=["incorrect", "unsafe", "exclude"], default="incorrect")
@@ -157,18 +158,24 @@ def main() -> None:
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
-    quant = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16) if args.load_in_4bit else None
-    log(f"loading base model from {args.base_model} (dtype=bf16, 4bit={args.load_in_4bit})...")
-    load_start = time.time()
-    model = AutoModelForCausalLM.from_pretrained(args.base_model, revision=args.revision, torch_dtype=torch.bfloat16, quantization_config=quant, device_map="auto", attn_implementation="sdpa")
-    if args.adapter:
-        log(f"loading LoRA adapter from {args.adapter}...")
-        model = PeftModel.from_pretrained(model, args.adapter)
-        log("adapter loaded")
-    log(f"base model loaded in {time.time()-load_start:.1f}s, device={next(model.parameters()).device}")
-    model.eval()
+    model = None
+    vllm_llm = None
+    if args.backend == "vllm":
+        log("backend=vllm: deferring model load until prompts are collected")
+    else:
+        quant = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16) if args.load_in_4bit else None
+        log(f"loading base model from {args.base_model} (dtype=bf16, 4bit={args.load_in_4bit})...")
+        load_start = time.time()
+        model = AutoModelForCausalLM.from_pretrained(args.base_model, revision=args.revision, torch_dtype=torch.bfloat16, quantization_config=quant, device_map="auto", attn_implementation="sdpa")
+        if args.adapter:
+            log(f"loading LoRA adapter from {args.adapter}...")
+            model = PeftModel.from_pretrained(model, args.adapter)
+            log("adapter loaded")
+        log(f"base model loaded in {time.time()-load_start:.1f}s, device={next(model.parameters()).device}")
+        model.eval()
 
     all_predictions: list[dict[str, Any]] = []
+    vllm_batches: list[tuple[str, list[dict[str, Any]], list[str]]] = []
     for specification in args.benchmark:
         name, path_text = specification.split("=", 1)
         rows = read_jsonl(Path(path_text))
@@ -211,6 +218,14 @@ def main() -> None:
                     half = args.max_input_tokens // 2
                     rendered = tokenizer.decode(ids[:half] + ids[-(args.max_input_tokens-half):], skip_special_tokens=True)
                 prompts.append(rendered)
+            if args.backend == "vllm":
+                existing = next((b for b in vllm_batches if b[0] == name), None)
+                if existing is None:
+                    vllm_batches.append((name, list(batch_rows), list(prompts)))
+                else:
+                    existing[1].extend(batch_rows)
+                    existing[2].extend(prompts)
+                continue
             encoded = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
             with torch.inference_mode():
                 generated = model.generate(**encoded, do_sample=False, max_new_tokens=args.max_new_tokens, pad_token_id=tokenizer.pad_token_id)
@@ -255,6 +270,49 @@ def main() -> None:
         if len(rows):
             log(f"  [{name}] done {len(rows)} rows in {time.time()-bench_start:.0f}s")
 
+    if args.backend == "vllm" and vllm_batches:
+        log(f"running vLLM generation on {sum(len(b) for _, b, _ in vllm_batches)} prompts...")
+        from vllm import LLM, SamplingParams
+        load_start = time.time()
+        vllm_llm = LLM(model=args.base_model, dtype="bfloat16", enforce_eager=True)
+        log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
+        sampling = SamplingParams(max_tokens=args.max_new_tokens, temperature=0.0, top_p=1.0)
+        for name, batch_rows, prompts in vllm_batches:
+            gen_start = time.time()
+            results = vllm_llm.generate(prompts, sampling)
+            outputs = [r.outputs[0].text for r in results]
+            for row, raw in zip(batch_rows, outputs):
+                parsed = parse_output(raw, args.family, str(row["view"]))
+                prediction = parsed["prediction"]
+                gold = str(row.get("safety_label"))
+                if prediction in {"safe", "unsafe"}:
+                    prediction_for_metrics = prediction
+                elif args.parse_error_policy == "unsafe":
+                    prediction_for_metrics = "unsafe"
+                elif args.parse_error_policy == "incorrect":
+                    prediction_for_metrics = "safe" if gold == "unsafe" else "unsafe"
+                else:
+                    prediction_for_metrics = None
+                all_predictions.append({
+                    "benchmark": name,
+                    "example_id": row.get("example_id"),
+                    "language": row.get("language"),
+                    "view": row.get("view"),
+                    "subset": row.get("subset") or "ALL",
+                    "topic": row.get("topic"),
+                    "gold": gold,
+                    "prediction": prediction,
+                    "prediction_for_metrics": prediction_for_metrics,
+                    "parse_status": parsed["parse_status"],
+                    "parsed_payload": parsed["payload"],
+                    "gold_categories": list(row.get("categories") or []),
+                    "predicted_categories": parsed["categories"],
+                    "unknown_categories": parsed["unknown_categories"],
+                    "raw_output": raw,
+                })
+            log(f"  [{name}] vLLM done {len(batch_rows)} rows in {time.time()-gen_start:.0f}s")
+        log(f"vLLM generation complete")
+
     with (args.output_dir / "predictions.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for row in all_predictions:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -276,6 +334,7 @@ def main() -> None:
         "revision": args.revision,
         "adapter": str(args.adapter) if args.adapter else None,
         "family": args.family,
+        "backend": args.backend,
         "parse_error_policy": args.parse_error_policy,
         "prompt_template_sha256": hashlib.sha256(NEMOTRON_PROMPT_TEMPLATE.encode("utf-8")).hexdigest() if args.family == "nemotron" else None,
         "protocol_note": "SEA rows evaluated with the configured model-native guard prompt; this is not the official SEA-HELM prompt/leaderboard protocol.",
