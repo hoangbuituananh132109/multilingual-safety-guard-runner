@@ -165,6 +165,7 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         "--family", str(model["family"]),
         "--output-dir", str(destination / "guard"),
         "--batch-size", str(config["evaluation"]["batch_size"]),
+        "--vllm-chunk-size", str(config["evaluation"].get("vllm_chunk_size", 1000)),
         "--backend", backend,
         *benchmark_args(config),
     ]
@@ -312,6 +313,25 @@ def main() -> None:
     compare_parser.add_argument("--checkpoint", choices=["before", "after"], default="before")
     compare_parser.add_argument("--method", choices=["lora", "full"], default="lora")
     compare_parser.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
+    progress_parser = subparsers.add_parser("progress")
+    progress_parser.add_argument("--model", required=True)
+    progress_parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    progress_parser.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
+    progress_parser.add_argument("--watch", type=float, default=0.0)
+    progress_parser.add_argument("--json", action="store_true")
+    eval_progress_parser = subparsers.add_parser("eval-progress")
+    eval_progress_parser.add_argument("--model", required=True)
+    eval_progress_parser.add_argument("--checkpoint", choices=["before", "after"], default="before")
+    eval_progress_parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    eval_progress_parser.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
+    eval_progress_parser.add_argument("--watch", type=float, default=0.0)
+    eval_progress_parser.add_argument("--json", action="store_true")
+    analyze_parser = subparsers.add_parser("analyze")
+    analyze_parser.add_argument("--model", required=True)
+    analyze_parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    analyze_parser.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
+    analyze_parser.add_argument("--smooth-window", type=int, default=25)
+    analyze_parser.add_argument("--output-dir", type=Path)
     unpack_parser = subparsers.add_parser("unpack")
     unpack_parser.add_argument("--replace", action="store_true")
     unpack_parser.add_argument("--strict", action="store_true")
@@ -349,6 +369,48 @@ def main() -> None:
         command = [sys.executable, str(ROOT / "compare_models.py"), "--config", str(config_path), "--checkpoint", args.checkpoint]
         if args.checkpoint == "after":
             command.extend(["--method", args.method, "--run-mode", args.run_mode])
+        execute(command, args.dry_run)
+    elif args.command == "progress":
+        command = [
+            sys.executable,
+            str(ROOT / "training_progress.py"),
+            "--config", str(config_path),
+            "--model", args.model,
+            "--method", args.method,
+            "--run-mode", args.run_mode,
+        ]
+        if args.watch > 0:
+            command.extend(["--watch", str(args.watch)])
+        if args.json:
+            command.append("--json")
+        execute(command, args.dry_run)
+    elif args.command == "eval-progress":
+        command = [
+            sys.executable,
+            str(ROOT / "evaluation_progress.py"),
+            "--config", str(config_path),
+            "--model", args.model,
+            "--checkpoint", args.checkpoint,
+            "--method", args.method,
+            "--run-mode", args.run_mode,
+        ]
+        if args.watch > 0:
+            command.extend(["--watch", str(args.watch)])
+        if args.json:
+            command.append("--json")
+        execute(command, args.dry_run)
+    elif args.command == "analyze":
+        command = [
+            sys.executable,
+            str(ROOT / "analyze_training.py"),
+            "--config", str(config_path),
+            "--model", args.model,
+            "--method", args.method,
+            "--run-mode", args.run_mode,
+            "--smooth-window", str(args.smooth_window),
+        ]
+        if args.output_dir is not None:
+            command.extend(["--output-dir", str(args.output_dir)])
         execute(command, args.dry_run)
     elif args.command == "unpack":
         command = [sys.executable, str(ROOT / "unpack_zips.py")]

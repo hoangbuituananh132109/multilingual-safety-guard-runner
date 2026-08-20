@@ -26,6 +26,16 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def write_progress(output_dir: Path, **values: Any) -> None:
+    payload = {
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        **values,
+    }
+    temporary = output_dir / "progress.json.tmp"
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(output_dir / "progress.json")
+
+
 def normalized_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
@@ -140,6 +150,7 @@ def main() -> None:
     parser.add_argument("--benchmark", action="append", required=True, help="NAME=/path/file.jsonl")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--vllm-chunk-size", type=int, default=1000)
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--load-in-4bit", action="store_true")
@@ -148,7 +159,18 @@ def main() -> None:
     parser.add_argument("--sample", type=int, help="Stratified random sample of N rows per benchmark (by language+view, fixed seed)")
     parser.add_argument("--parse-error-policy", choices=["incorrect", "unsafe", "exclude"], default="incorrect")
     args = parser.parse_args()
+    if args.vllm_chunk_size < 1:
+        raise ValueError("--vllm-chunk-size must be at least 1")
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    write_progress(
+        args.output_dir,
+        status="running",
+        phase="loading_tokenizer",
+        backend=args.backend,
+        completed=0,
+        total=None,
+        percent=None,
+    )
 
     tokenizer_source = args.adapter / "tokenizer" if args.adapter and (args.adapter / "tokenizer").exists() else args.base_model
     tokenizer_kwargs = {} if args.adapter and (args.adapter / "tokenizer").exists() else {"revision": args.revision}
@@ -176,6 +198,7 @@ def main() -> None:
 
     all_predictions: list[dict[str, Any]] = []
     vllm_batches: list[tuple[str, list[dict[str, Any]], list[str]]] = []
+    total_prepared = 0
     for specification in args.benchmark:
         name, path_text = specification.split("=", 1)
         rows = read_jsonl(Path(path_text))
@@ -225,6 +248,17 @@ def main() -> None:
                 else:
                     existing[1].extend(batch_rows)
                     existing[2].extend(prompts)
+                total_prepared += len(batch_rows)
+                write_progress(
+                    args.output_dir,
+                    status="running",
+                    phase="preparing_prompts",
+                    backend=args.backend,
+                    completed=total_prepared,
+                    total=None,
+                    percent=None,
+                    current_benchmark=name,
+                )
                 continue
             encoded = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
             with torch.inference_mode():
@@ -260,56 +294,104 @@ def main() -> None:
                     "unknown_categories": parsed["unknown_categories"],
                     "raw_output": raw,
                 })
-            with (args.output_dir / "progress.json").open("w", encoding="utf-8") as handle:
-                json.dump({"completed": len(all_predictions)}, handle)
+            write_progress(
+                args.output_dir,
+                status="running",
+                phase="generating",
+                backend=args.backend,
+                completed=len(all_predictions),
+                total=None,
+                percent=None,
+                current_benchmark=name,
+            )
             if len(all_predictions) % (args.batch_size * 5) == 0 or start + args.batch_size >= len(rows):
                 elapsed = time.time() - bench_start
                 done = min(start + args.batch_size, len(rows))
                 rate = done / elapsed if elapsed > 0 else 0
                 log(f"  [{name}] {done}/{len(rows)} ({100.0*done/len(rows):.1f}%) elapsed={elapsed:.0f}s rate={rate:.2f} rows/s")
         if len(rows):
-            log(f"  [{name}] done {len(rows)} rows in {time.time()-bench_start:.0f}s")
+            action = "prompts prepared" if args.backend == "vllm" else "done"
+            log(f"  [{name}] {action} {len(rows)} rows in {time.time()-bench_start:.0f}s")
 
     if args.backend == "vllm" and vllm_batches:
-        log(f"running vLLM generation on {sum(len(b) for _, b, _ in vllm_batches)} prompts...")
+        total_prompts = sum(len(batch_rows) for _, batch_rows, _ in vllm_batches)
+        log(f"running vLLM generation on {total_prompts} prompts in chunks of {args.vllm_chunk_size}...")
+        write_progress(
+            args.output_dir,
+            status="running",
+            phase="loading_model",
+            backend=args.backend,
+            completed=0,
+            total=total_prompts,
+            percent=0.0,
+        )
         from vllm import LLM, SamplingParams
         load_start = time.time()
         vllm_llm = LLM(model=args.base_model, dtype="bfloat16", enforce_eager=True)
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
         sampling = SamplingParams(max_tokens=args.max_new_tokens, temperature=0.0, top_p=1.0)
+        generation_start = time.time()
+        total_completed = 0
         for name, batch_rows, prompts in vllm_batches:
             gen_start = time.time()
-            results = vllm_llm.generate(prompts, sampling)
-            outputs = [r.outputs[0].text for r in results]
-            for row, raw in zip(batch_rows, outputs):
-                parsed = parse_output(raw, args.family, str(row["view"]))
-                prediction = parsed["prediction"]
-                gold = str(row.get("safety_label"))
-                if prediction in {"safe", "unsafe"}:
-                    prediction_for_metrics = prediction
-                elif args.parse_error_policy == "unsafe":
-                    prediction_for_metrics = "unsafe"
-                elif args.parse_error_policy == "incorrect":
-                    prediction_for_metrics = "safe" if gold == "unsafe" else "unsafe"
-                else:
-                    prediction_for_metrics = None
-                all_predictions.append({
-                    "benchmark": name,
-                    "example_id": row.get("example_id"),
-                    "language": row.get("language"),
-                    "view": row.get("view"),
-                    "subset": row.get("subset") or "ALL",
-                    "topic": row.get("topic"),
-                    "gold": gold,
-                    "prediction": prediction,
-                    "prediction_for_metrics": prediction_for_metrics,
-                    "parse_status": parsed["parse_status"],
-                    "parsed_payload": parsed["payload"],
-                    "gold_categories": list(row.get("categories") or []),
-                    "predicted_categories": parsed["categories"],
-                    "unknown_categories": parsed["unknown_categories"],
-                    "raw_output": raw,
-                })
+            for start in range(0, len(prompts), args.vllm_chunk_size):
+                chunk_rows = batch_rows[start:start + args.vllm_chunk_size]
+                chunk_prompts = prompts[start:start + args.vllm_chunk_size]
+                results = vllm_llm.generate(chunk_prompts, sampling)
+                outputs = [result.outputs[0].text for result in results]
+                for row, raw in zip(chunk_rows, outputs):
+                    parsed = parse_output(raw, args.family, str(row["view"]))
+                    prediction = parsed["prediction"]
+                    gold = str(row.get("safety_label"))
+                    if prediction in {"safe", "unsafe"}:
+                        prediction_for_metrics = prediction
+                    elif args.parse_error_policy == "unsafe":
+                        prediction_for_metrics = "unsafe"
+                    elif args.parse_error_policy == "incorrect":
+                        prediction_for_metrics = "safe" if gold == "unsafe" else "unsafe"
+                    else:
+                        prediction_for_metrics = None
+                    all_predictions.append({
+                        "benchmark": name,
+                        "example_id": row.get("example_id"),
+                        "language": row.get("language"),
+                        "view": row.get("view"),
+                        "subset": row.get("subset") or "ALL",
+                        "topic": row.get("topic"),
+                        "gold": gold,
+                        "prediction": prediction,
+                        "prediction_for_metrics": prediction_for_metrics,
+                        "parse_status": parsed["parse_status"],
+                        "parsed_payload": parsed["payload"],
+                        "gold_categories": list(row.get("categories") or []),
+                        "predicted_categories": parsed["categories"],
+                        "unknown_categories": parsed["unknown_categories"],
+                        "raw_output": raw,
+                    })
+                total_completed += len(chunk_rows)
+                elapsed = time.time() - generation_start
+                rate = total_completed / elapsed if elapsed > 0 else 0.0
+                remaining = total_prompts - total_completed
+                eta_seconds = remaining / rate if rate > 0 else None
+                write_progress(
+                    args.output_dir,
+                    status="running",
+                    phase="generating",
+                    backend=args.backend,
+                    completed=total_completed,
+                    total=total_prompts,
+                    percent=round(100.0 * total_completed / total_prompts, 2),
+                    current_benchmark=name,
+                    current_benchmark_completed=min(start + len(chunk_rows), len(batch_rows)),
+                    current_benchmark_total=len(batch_rows),
+                    rows_per_second=round(rate, 3),
+                    eta_seconds=round(eta_seconds) if eta_seconds is not None else None,
+                )
+                log(
+                    f"  [{name}] {min(start + len(chunk_rows), len(batch_rows))}/{len(batch_rows)} "
+                    f"overall={total_completed}/{total_prompts} ({100.0*total_completed/total_prompts:.1f}%) "
+                    f"rate={rate:.2f} rows/s"
+                )
             log(f"  [{name}] vLLM done {len(batch_rows)} rows in {time.time()-gen_start:.0f}s")
         log(f"vLLM generation complete")
 
@@ -340,6 +422,17 @@ def main() -> None:
         "protocol_note": "SEA rows evaluated with the configured model-native guard prompt; this is not the official SEA-HELM prompt/leaderboard protocol.",
     }
     (args.output_dir / "run_manifest.json").write_text(json.dumps(run_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_progress(
+        args.output_dir,
+        status="complete",
+        phase="complete",
+        backend=args.backend,
+        completed=len(all_predictions),
+        total=len(all_predictions),
+        percent=100.0,
+        predictions_file=str(args.output_dir / "predictions.jsonl"),
+        metrics_file=str(args.output_dir / "metrics.json"),
+    )
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ benchmarks:
 evaluation:
   backend: transformers
   batch_size: 4
+  vllm_chunk_size: 1000
   load_in_4bit: false
   likelihood_field: text
   likelihood_max_length: 2048

@@ -220,6 +220,37 @@ python run.py train --model qwen3_8b --method lora --mode full
 > python run.py train --model qwen3_8b --method lora --mode full --resume
 > ```
 
+### Theo dõi train khi terminal cũ bị treo hoặc bị đóng
+
+Mở terminal mới, vào thư mục project rồi chạy một lần:
+
+```bash
+python3 run.py progress --model qwen3_8b --method lora --run-mode full
+```
+
+Theo dõi tự động mỗi 30 giây:
+
+```bash
+python3 run.py progress --model qwen3_8b --method lora --run-mode full --watch 30
+```
+
+Lệnh đọc process đang chạy, checkpoint mới nhất, `trainer_state.json`, phần trăm
+hoàn thành, tốc độ ước tính và ETA. Nếu báo `complete` thì thư mục `final/` đã
+được lưu. Nếu báo `training_finished_but_final_save_missing`, không khởi động
+train mới; kiểm tra process vì model có thể đang ở bước lưu cuối.
+
+Nếu Qwen đang **evaluate** thay vì train:
+
+```bash
+python3 run.py eval-progress --model qwen3_8b --checkpoint before --watch 30
+```
+
+vLLM được chạy theo chunk (mặc định 1.000 prompt) và cập nhật
+`runs/<model>/<checkpoint>/guard/progress.json` sau từng chunk. Vì vậy terminal
+cũ có bị đóng vẫn xem được số prompt hoàn thành, tốc độ và ETA từ terminal mới.
+Job đã khởi động bằng phiên bản code cũ vẫn dò được PID/thời gian chạy, nhưng
+không thể khôi phục phần trăm chính xác nếu trước đó chưa tạo `progress.json`.
+
 ---
 
 ## 9. Đánh giá lại sau train (3 benchmark + BPB/PPL)
@@ -234,6 +265,29 @@ python run.py likelihood --model qwen3_8b --checkpoint after --method lora --run
 # So sánh before/after
 python run.py compare --checkpoint after --method lora --run-mode full
 ```
+
+### Vẽ loss và tạo báo cáo trước/sau train
+
+Ví dụ với Llama 3.1 8B Instruct đã train LoRA full:
+
+```bash
+python3 run.py analyze --model llama31_8b_instruct --method lora --run-mode full
+```
+
+Kết quả nằm tại:
+
+```text
+runs/llama31_8b_instruct/lora_full/analysis/
+├── REPORT.md
+├── train_loss.csv
+├── train_loss.svg
+├── before_after_metrics.csv
+├── before_after_metrics.json
+└── guard_before_after.svg
+```
+
+Script lấy loss từ `trainer_state.json` gần nhất. Báo cáo trước/sau chỉ đầy đủ
+khi đã chạy `evaluate` và `likelihood` cho cả checkpoint `before` và `after`.
 
 Kết quả:
 ```
