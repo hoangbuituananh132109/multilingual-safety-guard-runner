@@ -1,4 +1,4 @@
-﻿paths:
+paths:
   zip_root: zip
   input_root: input
   work_root: work
@@ -56,7 +56,7 @@ training:
     smoke_max_steps: 3
     pilot_max_steps: 100
   lora:
-    epochs: 1
+    epochs: 5
     learning_rate: 1.0e-05
     per_device_batch_size: 4
     gradient_accumulation_steps: 8
