@@ -160,17 +160,28 @@ def metric_rows(before_dir: Path, after_dir: Path) -> tuple[list[dict[str, Any]]
     for benchmark in sorted(set(before_guard) | set(after_guard)):
         before = before_guard.get(benchmark, {})
         after = after_guard.get(benchmark, {})
+        before_examples = before.get("examples")
+        after_examples = after.get("examples")
         for metric in GUARD_METRICS:
             before_value = before.get(metric)
             after_value = after.get(metric)
+            comparison_status = comparison_status_for(
+                before_value,
+                after_value,
+                before_examples,
+                after_examples,
+            )
             rows.append({
                 "task": "guard",
                 "benchmark": benchmark,
                 "metric": metric,
+                "before_examples": before_examples,
+                "after_examples": after_examples,
                 "before": before_value,
                 "after": after_value,
-                "delta": float(after_value) - float(before_value) if before_value is not None and after_value is not None else None,
+                "delta": float(after_value) - float(before_value) if comparison_status == "comparable" else None,
                 "better_direction": "higher",
+                "comparison_status": comparison_status,
             })
     before_like_path = before_dir / "likelihood" / "likelihood_metrics.json"
     after_like_path = after_dir / "likelihood" / "likelihood_metrics.json"
@@ -183,22 +194,54 @@ def metric_rows(before_dir: Path, after_dir: Path) -> tuple[list[dict[str, Any]]
     for metric in ("bits_per_byte", "perplexity"):
         before_value = before_like.get(metric) if before_like else None
         after_value = after_like.get(metric) if after_like else None
+        before_examples = before_like.get("examples") if before_like else None
+        after_examples = after_like.get("examples") if after_like else None
+        comparison_status = comparison_status_for(
+            before_value,
+            after_value,
+            before_examples,
+            after_examples,
+        )
         rows.append({
             "task": "likelihood",
             "benchmark": "sea_vi",
             "metric": metric,
+            "before_examples": before_examples,
+            "after_examples": after_examples,
             "before": before_value,
             "after": after_value,
-            "delta": float(after_value) - float(before_value) if before_value is not None and after_value is not None else None,
+            "delta": float(after_value) - float(before_value) if comparison_status == "comparable" else None,
             "better_direction": "lower",
+            "comparison_status": comparison_status,
         })
     return rows, missing
+
+
+def comparison_status_for(
+    before_value: Any,
+    after_value: Any,
+    before_examples: Any,
+    after_examples: Any,
+) -> str:
+    if before_value is None and after_value is None:
+        return "metric_unavailable"
+    if before_value is None:
+        return "missing_before"
+    if after_value is None:
+        return "missing_after"
+    if before_examples is None or after_examples is None:
+        return "sample_size_unknown"
+    if int(before_examples) != int(after_examples):
+        return "sample_size_mismatch"
+    return "comparable"
 
 
 def metric_svg(path: Path, rows: list[dict[str, Any]], model: str) -> None:
     selected = [
         row for row in rows
-        if row["task"] == "guard" and row["metric"] in {"macro_f1", "unsafe_recall", "unsafe_f1"} and row["before"] is not None and row["after"] is not None
+        if row["task"] == "guard"
+        and row["metric"] in {"macro_f1", "unsafe_recall", "unsafe_f1"}
+        and row["comparison_status"] == "comparable"
     ]
     if not selected:
         return
@@ -251,6 +294,27 @@ def markdown_report(
         f"- Trainer state: `{state_path}`" if state_path else "- Trainer state: missing",
         f"- Logged loss points: {len(losses)}",
     ]
+    sample_mismatches = {
+        (row["benchmark"], row["before_examples"], row["after_examples"])
+        for row in metrics
+        if row["comparison_status"] == "sample_size_mismatch"
+    }
+    if sample_mismatches:
+        lines.extend([
+            "",
+            "## Comparison warning",
+            "",
+            "The following before/after results use different sample counts. Their deltas are intentionally omitted:",
+            "",
+        ])
+        lines.extend(
+            f"- `{benchmark}`: before={before_examples}, after={after_examples}"
+            for benchmark, before_examples, after_examples in sorted(sample_mismatches)
+        )
+        lines.extend([
+            "",
+            "Re-run both checkpoints with the same full benchmark or the same fixed `--sample` value before interpreting change.",
+        ])
     if losses:
         lines.extend([
             f"- First loss: {losses[0]['loss']:.6f} at step {losses[0]['step']}",
@@ -259,13 +323,24 @@ def markdown_report(
             "",
             "![Training loss](train_loss.svg)",
         ])
-    lines.extend(["", "## Before vs after", "", "| Benchmark | Metric | Before | After | Delta | Better |", "|---|---:|---:|---:|---:|---|"])
+    lines.extend([
+        "",
+        "## Before vs after",
+        "",
+        "| Benchmark | Metric | N before | N after | Before | After | Delta | Status | Better |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|",
+    ])
     for row in metrics:
         before = "missing" if row["before"] is None else f"{float(row['before']):.6f}"
         after = "missing" if row["after"] is None else f"{float(row['after']):.6f}"
         delta = "missing" if row["delta"] is None else f"{float(row['delta']):+.6f}"
-        lines.append(f"| {row['benchmark']} | {row['metric']} | {before} | {after} | {delta} | {row['better_direction']} |")
-    if any(row["before"] is not None and row["after"] is not None for row in metrics):
+        before_examples = row["before_examples"] if row["before_examples"] is not None else "?"
+        after_examples = row["after_examples"] if row["after_examples"] is not None else "?"
+        lines.append(
+            f"| {row['benchmark']} | {row['metric']} | {before_examples} | {after_examples} | "
+            f"{before} | {after} | {delta} | {row['comparison_status']} | {row['better_direction']} |"
+        )
+    if any(row["comparison_status"] == "comparable" for row in metrics):
         lines.extend(["", "![Guard metrics](guard_before_after.svg)"])
     if missing:
         lines.extend(["", "## Missing inputs", ""])
