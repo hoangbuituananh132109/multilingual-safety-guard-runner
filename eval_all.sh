@@ -15,6 +15,7 @@ export MODEL_PATH_LLAMA31_8B_INSTRUCT="${MODEL_PATH_LLAMA31_8B_INSTRUCT:-/worksp
 export MODEL_PATH_LLAMA31_NEMOTRON="${MODEL_PATH_LLAMA31_NEMOTRON:-/workspace/storage-shared/nlp/huypq51/models/Llama-3.1-Nemotron-Safety-Guard-8B-v3}"
 
 PY="python3"
+export FLASHINFER_DISABLE_VERSION_CHECK=1
 echo "===== [1/8] prepare benchmarks (standard/JB split) ====="
 $PY run.py prepare
 
