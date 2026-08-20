@@ -5,10 +5,16 @@ import csv
 import hashlib
 import json
 import re
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def log(message: str) -> None:
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[evaluate] {stamp} {message}", flush=True)
 
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 
@@ -145,14 +151,21 @@ def main() -> None:
 
     tokenizer_source = args.adapter / "tokenizer" if args.adapter and (args.adapter / "tokenizer").exists() else args.base_model
     tokenizer_kwargs = {} if args.adapter and (args.adapter / "tokenizer").exists() else {"revision": args.revision}
+    log(f"loading tokenizer from {tokenizer_source}...")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, **tokenizer_kwargs)
+    log(f"tokenizer loaded, vocab={getattr(tokenizer, 'vocab_size', '?')}")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
     quant = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16) if args.load_in_4bit else None
+    log(f"loading base model from {args.base_model} (dtype=bf16, 4bit={args.load_in_4bit})...")
+    load_start = time.time()
     model = AutoModelForCausalLM.from_pretrained(args.base_model, revision=args.revision, torch_dtype=torch.bfloat16, quantization_config=quant, device_map="auto", attn_implementation="sdpa")
     if args.adapter:
+        log(f"loading LoRA adapter from {args.adapter}...")
         model = PeftModel.from_pretrained(model, args.adapter)
+        log("adapter loaded")
+    log(f"base model loaded in {time.time()-load_start:.1f}s, device={next(model.parameters()).device}")
     model.eval()
 
     all_predictions: list[dict[str, Any]] = []
@@ -179,6 +192,8 @@ def main() -> None:
             rows = sampled[:args.sample]
         elif args.limit:
             rows = rows[:args.limit]
+        log(f"benchmark={name} rows={len(rows)} batch_size={args.batch_size}")
+        bench_start = time.time()
         for start in range(0, len(rows), args.batch_size):
             batch_rows = rows[start:start + args.batch_size]
             prompts = []
@@ -232,6 +247,13 @@ def main() -> None:
                 })
             with (args.output_dir / "progress.json").open("w", encoding="utf-8") as handle:
                 json.dump({"completed": len(all_predictions)}, handle)
+            if len(all_predictions) % (args.batch_size * 5) == 0 or start + args.batch_size >= len(rows):
+                elapsed = time.time() - bench_start
+                done = min(start + args.batch_size, len(rows))
+                rate = done / elapsed if elapsed > 0 else 0
+                log(f"  [{name}] {done}/{len(rows)} ({100.0*done/len(rows):.1f}%) elapsed={elapsed:.0f}s rate={rate:.2f} rows/s")
+        if len(rows):
+            log(f"  [{name}] done {len(rows)} rows in {time.time()-bench_start:.0f}s")
 
     with (args.output_dir / "predictions.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for row in all_predictions:

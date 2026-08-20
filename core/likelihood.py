@@ -4,10 +4,16 @@ import argparse
 import csv
 import json
 import math
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def log(message: str) -> None:
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[likelihood] {stamp} {message}", flush=True)
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -83,12 +89,16 @@ def main() -> None:
 
     tokenizer_source = args.adapter / "tokenizer" if args.adapter and (args.adapter / "tokenizer").exists() else args.base_model
     tokenizer_kwargs = {} if args.adapter and (args.adapter / "tokenizer").exists() else {"revision": args.revision}
+    log(f"loading tokenizer from {tokenizer_source}...")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, **tokenizer_kwargs)
+    log(f"tokenizer loaded, vocab={getattr(tokenizer, 'vocab_size', '?')}")
     quant = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16,
     ) if args.load_in_4bit else None
+    log(f"loading base model from {args.base_model} (dtype=bf16, 4bit={args.load_in_4bit})...")
+    load_start = time.time()
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model,
         revision=args.revision,
@@ -98,7 +108,10 @@ def main() -> None:
         attn_implementation="sdpa",
     )
     if args.adapter:
+        log(f"loading LoRA adapter from {args.adapter}...")
         model = PeftModel.from_pretrained(model, args.adapter)
+        log("adapter loaded")
+    log(f"base model loaded in {time.time()-load_start:.1f}s, device={next(model.parameters()).device}")
     model.eval()
 
     results: list[dict[str, Any]] = []
@@ -107,6 +120,8 @@ def main() -> None:
         rows = [row for row in read_jsonl(Path(path_text)) if args.language == "all" or str(row.get("language")) == args.language]
         if args.limit is not None:
             rows = rows[:args.limit]
+        log(f"benchmark={name} language={args.language} rows={len(rows)} max_length={args.max_length} stride={args.stride}")
+        bench_start = time.time()
         for index, row in enumerate(rows, 1):
             text = row.get(args.field)
             if text is None or not str(text).strip():
@@ -131,6 +146,12 @@ def main() -> None:
             results.append(result)
             if index % 25 == 0:
                 (args.output_dir / "progress.json").write_text(json.dumps({"completed": len(results)}) + "\n", encoding="utf-8")
+                elapsed = time.time() - bench_start
+                rate = index / elapsed if elapsed > 0 else 0
+                log(f"  [{name}] {index}/{len(rows)} ({100.0*index/len(rows):.1f}%) elapsed={elapsed:.0f}s rate={rate:.2f} rows/s")
+        if len(rows):
+            elapsed = time.time() - bench_start
+            log(f"  [{name}] done {len(rows)} rows in {elapsed:.0f}s")
 
     with (args.output_dir / "likelihood_predictions.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
         for row in results:
