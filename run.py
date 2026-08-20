@@ -232,7 +232,7 @@ def likelihood(config: dict[str, Any], model: dict[str, Any], checkpoint: str, m
     execute(command, dry_run)
 
 
-def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str, resume: bool, dry_run: bool) -> None:
+def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str, resume: bool, dry_run: bool, no_checkpoints: bool = False) -> None:
     output = run_root(config, model, method, mode)
     common = dict(config["training"]["common"])
     method_settings = dict(config["training"][method])
@@ -272,6 +272,8 @@ def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str,
     # Skip eval during training by default: eval on the full valid set is very
     # expensive and makes training look stuck. Run eval separately afterwards.
     command.append("--skip-eval")
+    if no_checkpoints:
+        command.append("--no-checkpoints")
     if mode == "smoke":
         command.extend(["--max-steps", str(settings["smoke_max_steps"])])
     elif mode == "pilot":
@@ -383,6 +385,7 @@ def main() -> None:
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
     train_parser.add_argument("--mode", choices=["smoke", "pilot", "full"], default="smoke")
     train_parser.add_argument("--resume", action="store_true")
+    train_parser.add_argument("--no-checkpoints", action="store_true", help="Only save final model, skip periodic checkpoints")
     train35_parser = subparsers.add_parser("train_qwen35")
     train35_parser.add_argument("--model", required=True)
     train35_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -470,7 +473,7 @@ def main() -> None:
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":
-            train(config, model, args.method, args.mode, args.resume, args.dry_run)
+            train(config, model, args.method, args.mode, args.resume, args.dry_run, getattr(args, "no_checkpoints", False))
         elif args.command == "train_qwen35":
             train_qwen35(config, model, args.method, args.mode, args.resume, args.dry_run)
 

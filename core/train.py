@@ -83,6 +83,7 @@ def main() -> None:
     parser.add_argument("--resume", nargs="?", const="auto")
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--skip-eval", action="store_true", help="Do not run eval during training (default: skip eval to avoid hanging on large valid set)")
+    parser.add_argument("--no-checkpoints", action="store_true", help="Only save the final model; skip periodic checkpoints to save disk/I/O")
     args = parser.parse_args()
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     model_cfg, data_cfg, train_cfg = cfg["model"], cfg["data"], cfg["training"]
@@ -173,7 +174,7 @@ def main() -> None:
         lr_scheduler_type=train_cfg["lr_scheduler_type"], lr_scheduler_kwargs={"warmup_ratio": float(train_cfg["warmup_ratio"])}, bf16=True, tf32=True,
         gradient_checkpointing=bool(train_cfg["gradient_checkpointing"]), gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=int(train_cfg["logging_steps"]), save_steps=int(train_cfg["save_steps"]), eval_steps=int(train_cfg["eval_steps"]),
-        eval_strategy="no" if args.skip_eval else "steps", save_strategy="steps", save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
+        eval_strategy="no" if args.skip_eval else "steps", save_strategy="no" if args.no_checkpoints else "steps", save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
         report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=False,
         remove_unused_columns=False, label_names=["labels"], save_safetensors=True,
     )
