@@ -36,6 +36,7 @@ benchmarks:
   - zh
 evaluation:
   backend: transformers
+  gpu_memory_utilization: 0.6
   batch_size: 4
   vllm_chunk_size: 1000
   load_in_4bit: false

@@ -192,6 +192,7 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         "--output-dir", str(destination / "guard"),
         "--batch-size", str(config["evaluation"]["batch_size"]),
         "--vllm-chunk-size", str(config["evaluation"].get("vllm_chunk_size", 1000)),
+        "--gpu-memory-utilization", str(config["evaluation"].get("gpu_memory_utilization", 0.92)),
         "--backend", backend,
         *benchmark_args(config),
     ]

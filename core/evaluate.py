@@ -152,6 +152,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--vllm-chunk-size", type=int, default=1000)
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.92)
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--load-in-4bit", action="store_true")
@@ -328,7 +329,7 @@ def main() -> None:
         )
         from vllm import LLM, SamplingParams
         load_start = time.time()
-        vllm_llm = LLM(model=args.base_model, dtype="bfloat16", enforce_eager=True)
+        vllm_llm = LLM(model=args.base_model, dtype="bfloat16", enforce_eager=True, gpu_memory_utilization=args.gpu_memory_utilization)
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
         sampling = SamplingParams(max_tokens=args.max_new_tokens, temperature=0.0, top_p=1.0)
         generation_start = time.time()
