@@ -136,7 +136,8 @@ def benchmark_args(config: dict[str, Any]) -> list[str]:
     root = Path(config["benchmarks"]["output_dir"])
     result: list[str] = []
     for name, filename in (
-        ("cultureguard", "cultureguard_test_9lang.jsonl"),
+        ("cultureguard_standard", "cultureguard_standard_9lang.jsonl"),
+        ("cultureguard_jb", "cultureguard_jb_9lang.jsonl"),
         ("xsafety", "xsafety_multilingual.jsonl"),
         ("sea_vi", "sea_safeguard_vi.jsonl"),
     ):
@@ -362,6 +363,11 @@ def main() -> None:
     unpack_parser.add_argument("--strict", action="store_true")
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--limit", type=int, default=0)
+    nvidia_parser = subparsers.add_parser("nvidia-report", help="NVIDIA-compatible average harmful-F1 report from a run's guard metrics.")
+    nvidia_parser.add_argument("--model", required=True)
+    nvidia_parser.add_argument("--checkpoint", choices=["before", "after"], default="before")
+    nvidia_parser.add_argument("--method", choices=["lora", "full"], default="lora")
+    nvidia_parser.add_argument("--run-mode", choices=["smoke", "pilot", "full"], default="full")
     for command in ("evaluate", "likelihood"):
         value = subparsers.add_parser(command)
         value.add_argument("--model", required=True)
@@ -446,6 +452,17 @@ def main() -> None:
         execute(command, args.dry_run)
     elif args.command == "prepare":
         prepare(config, args.limit, args.dry_run)
+    elif args.command == "nvidia-report":
+        model = selected_model(config, args.model)
+        runs_root = Path(config["paths"]["runs_root"])
+        if not runs_root.is_absolute():
+            runs_root = config_path.parent / runs_root
+        if args.checkpoint == "before":
+            metrics = runs_root / str(model["name"]) / "base" / "guard" / "metrics.json"
+        else:
+            metrics = runs_root / str(model["name"]) / f"{args.method}_{args.run_mode}" / "guard" / "metrics.json"
+        out = metrics.parent / "nvidia_report.json"
+        execute([sys.executable, str(ROOT / "nvidia_report.py"), "--metrics", str(metrics), "--out", str(out)], args.dry_run)
     else:
         model = selected_model(config, args.model)
         if args.command == "evaluate":

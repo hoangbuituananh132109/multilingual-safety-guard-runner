@@ -40,13 +40,14 @@ def read_jsonl(path: Path) -> Iterable[dict[str, Any]]:
                     yield value
 
 
-def canonical(source_id: str, split: str, language: str, view: str, prompt: str, response: str | None, label: str, prompt_label: str, categories: list[str]) -> dict[str, Any]:
+def canonical(source_id: str, split: str, language: str, view: str, prompt: str, response: str | None, label: str, prompt_label: str, categories: list[str], tag: str | None = None) -> dict[str, Any]:
     text = f"Prompt: {prompt}" + (f"\nResponse: {response}" if response is not None else "")
     return {
         "example_id": f"nemotron_v3:{source_id}:{view}:{language}",
         "source_id": source_id,
         "source_split": split,
         "dataset_source": "nemotron_v3",
+        "tag": tag,
         "language": language,
         "view": view,
         "text": text,
@@ -77,12 +78,13 @@ def rows(root: Path, split: str, languages: set[str]) -> Iterable[dict[str, Any]
             if language not in languages:
                 continue
             source_id = str(clean(row.get("id")) or digest(f"{path}:{row['_source_line']}"))
+            tag = str(clean(row.get("tag")) or "").strip() or None
             categories = [value.strip() for value in str(clean(row.get("violated_categories")) or "").split(",") if value.strip()]
             if prompt and prompt_label in VALID_LABELS:
-                yield canonical(source_id, split, language, "P", str(prompt), None, prompt_label, prompt_label, [])
+                yield canonical(source_id, split, language, "P", str(prompt), None, prompt_label, prompt_label, [], tag)
             if prompt and response and response_label in VALID_LABELS:
                 safe_prompt_label = prompt_label if prompt_label in VALID_LABELS else "safe"
-                yield canonical(source_id, split, language, "PR", str(prompt), str(response), response_label, safe_prompt_label, categories)
+                yield canonical(source_id, split, language, "PR", str(prompt), str(response), response_label, safe_prompt_label, categories, tag)
 
 
 def write_split(path: Path, values: Iterable[dict[str, Any]]) -> tuple[dict[str, Any], set[tuple[str, str]]]:
@@ -99,6 +101,8 @@ def write_split(path: Path, values: Iterable[dict[str, Any]]) -> tuple[dict[str,
             counts["examples"] += 1
             for field in ("language", "view", "safety_label"):
                 counts[f"{field}:{row[field]}"] += 1
+            if row.get("tag"):
+                counts[f"tag:{row['tag']}"] += 1
     identities = {(source_id, language) for source_id, _view, language in seen}
     return {"path": str(path), "sha256": file_digest(path), **dict(counts)}, identities
 

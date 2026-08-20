@@ -24,11 +24,12 @@ benchmarks:
   xsafety_root: input/xsafety
   xsafety_revision: 8c55b6a6cda594cd550a4921513238a2dd40eb5a
   output_dir: work/benchmarks
+  # XSafety languages matching paper Table 15 (harmful-F1): en ar de fr hi ja zh.
+  # NOTE: paper Table 16 (harmful-recall) uses 9 langs (adds es, th).
   xsafety_languages:
   - en
   - ar
   - de
-  - es
   - fr
   - hi
   - ja

@@ -147,14 +147,16 @@ def main() -> None:
         raise ValueError("Provide --xsafety-root or --download-xsafety")
 
     outputs = {
-        "cultureguard": args.output_dir / "cultureguard_test_9lang.jsonl",
+        "cultureguard_standard": args.output_dir / "cultureguard_standard_9lang.jsonl",
+        "cultureguard_jb": args.output_dir / "cultureguard_jb_9lang.jsonl",
         "sea_vi": args.output_dir / "sea_safeguard_vi.jsonl",
         "xsafety": args.output_dir / "xsafety_multilingual.jsonl",
     }
     manifest = {
         "suite": "safety_guard_three_benchmarks_v1",
         "notes": {
-            "cultureguard": "Official held-out test split; prompt and response guard classification.",
+            "cultureguard_standard": "Official held-out test split, tag != jailbreaking; prompt and response guard classification.",
+            "cultureguard_jb": "Official held-out test split, tag == jailbreaking; prompt and response guard classification.",
             "sea_vi": "Vietnamese-only SEA-HELM safeguard rows; prompt and response guard classification.",
             "xsafety": "Unsafe-prompt recall diagnostic; XSafety has no Vietnamese and is not a balanced classification set.",
         },
@@ -165,7 +167,15 @@ def main() -> None:
         },
         "benchmarks": {},
     }
-    manifest["benchmarks"]["cultureguard"] = write_jsonl(outputs["cultureguard"], read_jsonl(args.cultureguard_test))
+    cultureguard_rows = list(read_jsonl(args.cultureguard_test))
+    manifest["benchmarks"]["cultureguard_standard"] = write_jsonl(
+        outputs["cultureguard_standard"],
+        (row for row in cultureguard_rows if str(row.get("tag") or "").strip() != "jailbreaking"),
+    )
+    manifest["benchmarks"]["cultureguard_jb"] = write_jsonl(
+        outputs["cultureguard_jb"],
+        (row for row in cultureguard_rows if str(row.get("tag") or "").strip() == "jailbreaking"),
+    )
     manifest["benchmarks"]["sea_vi"] = write_jsonl(
         outputs["sea_vi"],
         (row for row in read_jsonl(args.sea_source) if str(row.get("language")) == "vi"),
