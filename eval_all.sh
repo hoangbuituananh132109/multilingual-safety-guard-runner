@@ -16,6 +16,7 @@ export MODEL_PATH_LLAMA31_NEMOTRON="${MODEL_PATH_LLAMA31_NEMOTRON:-/workspace/st
 
 PY="python3"
 export FLASHINFER_DISABLE_VERSION_CHECK=1
+export VLLM_ATTENTION_BACKEND=TORCH_SDPA
 echo "===== [1/8] prepare benchmarks (standard/JB split) ====="
 $PY run.py prepare
 

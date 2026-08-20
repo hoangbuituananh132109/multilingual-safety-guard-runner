@@ -316,6 +316,10 @@ def main() -> None:
             log(f"  [{name}] {action} {len(rows)} rows in {time.time()-bench_start:.0f}s")
 
     if args.backend == "vllm" and vllm_batches:
+        # Force native PyTorch attention so vLLM does not try to JIT-compile
+        # flashinfer kernels (which fail without nvrtc.h on this box).
+        os.environ.setdefault("VLLM_ATTENTION_BACKEND", "TORCH_SDPA")
+
         total_prompts = sum(len(batch_rows) for _, batch_rows, _ in vllm_batches)
         log(f"running vLLM generation on {total_prompts} prompts in chunks of {args.vllm_chunk_size}...")
         write_progress(
