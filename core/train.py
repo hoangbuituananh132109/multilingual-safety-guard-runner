@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,43 @@ class StepLogger(TrainerCallback):
             return
         elapsed = time.time() - self.step_start
         log(f"step={state.global_step} elapsed_since_last={elapsed:.1f}s {vram_mb()} logs={json.dumps(logs)}")
+
+
+def sync_resume_intervals(output: Path, resume_arg: str | None, train_cfg: dict[str, Any]) -> str | None:
+    """Update stale callback intervals stored by an older checkpoint."""
+    if resume_arg is None:
+        return None
+    if resume_arg == "auto":
+        checkpoints = []
+        for path in output.glob("checkpoint-*"):
+            try:
+                checkpoints.append((int(path.name.rsplit("-", 1)[1]), path))
+            except (IndexError, ValueError):
+                continue
+        if not checkpoints:
+            raise FileNotFoundError(f"--resume requested but no checkpoint-* exists under {output}")
+        checkpoint = max(checkpoints)[1]
+    else:
+        checkpoint = Path(resume_arg)
+
+    state_path = checkpoint / "trainer_state.json"
+    if not state_path.is_file():
+        raise FileNotFoundError(f"Missing trainer state: {state_path}")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    current = {
+        "logging_steps": int(train_cfg["logging_steps"]),
+        "eval_steps": int(train_cfg["eval_steps"]),
+        "save_steps": int(train_cfg["save_steps"]),
+    }
+    changed = {key: (state.get(key), value) for key, value in current.items() if state.get(key) != value}
+    if changed:
+        backup = checkpoint / "trainer_state.before_interval_sync.json"
+        if not backup.exists():
+            shutil.copy2(state_path, backup)
+        state.update(current)
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        log(f"updated resume intervals in {state_path}: {changed}")
+    return str(checkpoint)
 
 
 def target_text(row: dict[str, Any], family: str) -> str:
@@ -184,7 +222,7 @@ def main() -> None:
     eval_dataset = None if args.skip_eval else tokenized["validation"]
     trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=eval_dataset, data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
     trainer.add_callback(StepLogger())
-    resume = True if args.resume == "auto" else args.resume
+    resume = sync_resume_intervals(output, args.resume, train_cfg)
     log(f"starting training (resume={resume}, eval={'skipped' if args.skip_eval else 'enabled'})...")
     train_start = time.time()
     result = trainer.train(resume_from_checkpoint=resume)
