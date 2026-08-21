@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 import yaml
+from accelerate.state import PartialState
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -26,6 +27,8 @@ from prompt import N23, render_prompt
 
 
 def log(message: str) -> None:
+    if int(os.environ.get("RANK", "0")) != 0:
+        return
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[train] {stamp} {message}", flush=True)
 
@@ -36,6 +39,19 @@ def vram_mb() -> str:
     allocated = torch.cuda.memory_allocated() / (1024 * 1024)
     reserved = torch.cuda.memory_reserved() / (1024 * 1024)
     return f"alloc={allocated:.0f}MB reserved={reserved:.0f}MB"
+
+
+def configure_vram_limit(distributed_state: PartialState, fraction: float | None) -> None:
+    if fraction is None:
+        return
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError("--vram-fraction must be greater than 0 and at most 1")
+    if distributed_state.device.type != "cuda":
+        raise RuntimeError("--vram-fraction requires CUDA")
+    torch.cuda.set_device(distributed_state.device)
+    torch.cuda.set_per_process_memory_fraction(fraction, distributed_state.device)
+    total_gib = torch.cuda.get_device_properties(distributed_state.device).total_memory / (1024**3)
+    log(f"VRAM allocator cap={fraction:.3f} ({total_gib * fraction:.1f}/{total_gib:.1f} GiB per process)")
 
 
 class StepLogger(TrainerCallback):
@@ -122,7 +138,12 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--skip-eval", action="store_true", help="Do not run eval during training (default: skip eval to avoid hanging on large valid set)")
     parser.add_argument("--no-checkpoints", action="store_true", help="Only save the final model; skip periodic checkpoints to save disk/I/O")
+    parser.add_argument("--no-final-save", action="store_true", help="Skip the final model export; intended only for disposable capacity probes")
+    parser.add_argument("--vram-fraction", type=float, help="Cap the PyTorch allocator to a fraction of each visible GPU")
+    parser.add_argument("--local-rank", "--local_rank", type=int, default=int(os.environ.get("LOCAL_RANK", "-1")))
     args = parser.parse_args()
+    distributed_state = PartialState()
+    configure_vram_limit(distributed_state, args.vram_fraction)
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     model_cfg, data_cfg, train_cfg = cfg["model"], cfg["data"], cfg["training"]
     log(f"config loaded from {args.config}")
@@ -165,8 +186,12 @@ def main() -> None:
         log(f"LoRA applied, {vram_mb()}")
 
     log("loading dataset...")
-    raw = load_dataset("json", data_files={"train": data_cfg["train"], "validation": data_cfg["validation"]})
+    with distributed_state.local_main_process_first():
+        raw = load_dataset("json", data_files={"train": data_cfg["train"], "validation": data_cfg["validation"]})
     log(f"dataset loaded: train={len(raw['train'])} validation={len(raw['validation'])}")
+    effective_batch = int(train_cfg["per_device_batch_size"]) * int(train_cfg["gradient_accumulation_steps"]) * distributed_state.num_processes
+    update_steps = (len(raw["train"]) + effective_batch - 1) // effective_batch
+    log(f"world_size={distributed_state.num_processes} effective_global_batch={effective_batch} estimated_updates_per_epoch={update_steps}")
     allowed = {"P", "PR"}
     if any(view not in allowed for view in set(raw["train"]["view"])):
         raise ValueError("Clean contract violation: only P/PR are allowed; response-only R is forbidden.")
@@ -186,11 +211,13 @@ def main() -> None:
 
     log("tokenizing dataset (may take a few minutes)...")
     tokenize_start = time.time()
-    tokenized = raw.map(tokenize, remove_columns=raw["train"].column_names, num_proc=max(1, min(8, os.cpu_count() or 1)), desc="Tokenizing completion-only safety targets")
+    with distributed_state.local_main_process_first():
+        tokenized = raw.map(tokenize, remove_columns=raw["train"].column_names, num_proc=max(1, min(8, os.cpu_count() or 1)), desc="Tokenizing completion-only safety targets")
     log(f"tokenization done in {time.time() - tokenize_start:.1f}s")
     output = Path(cfg["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
-    (output / "resolved_config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if distributed_state.is_main_process:
+        (output / "resolved_config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     total_parameters = sum(parameter.numel() for parameter in model.parameters())
     trainable_parameters = sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     parameter_report = {
@@ -199,8 +226,9 @@ def main() -> None:
         "trainable_parameters": trainable_parameters,
         "trainable_percent": 100.0 * trainable_parameters / total_parameters,
     }
-    (output / "trainable_parameters.json").write_text(json.dumps(parameter_report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(parameter_report, indent=2))
+    if distributed_state.is_main_process:
+        (output / "trainable_parameters.json").write_text(json.dumps(parameter_report, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(parameter_report, indent=2))
     log(f"trainable params: {trainable_parameters:,} ({parameter_report['trainable_percent']:.4f}%)")
     import inspect as _inspect
     from transformers import TrainingArguments as _TA
@@ -216,23 +244,37 @@ def main() -> None:
         report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=False,
         remove_unused_columns=False, label_names=["labels"], save_safetensors=True,
     )
+    if train_cfg.get("optim"):
+        _ta_kwargs["optim"] = str(train_cfg["optim"])
     _ta_kwargs = {k: v for k, v in _ta_kwargs.items() if k in _sig_params}
     training_args = _TA(**_ta_kwargs)
     log("building Trainer...")
     eval_dataset = None if args.skip_eval else tokenized["validation"]
     trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=eval_dataset, data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
-    trainer.add_callback(StepLogger())
-    resume = sync_resume_intervals(output, args.resume, train_cfg)
+    if trainer.is_world_process_zero():
+        trainer.add_callback(StepLogger())
+        resume = sync_resume_intervals(output, args.resume, train_cfg)
+    else:
+        resume = None
+    distributed_state.wait_for_everyone()
+    if not trainer.is_world_process_zero():
+        resume = sync_resume_intervals(output, args.resume, train_cfg)
     log(f"starting training (resume={resume}, eval={'skipped' if args.skip_eval else 'enabled'})...")
     train_start = time.time()
     result = trainer.train(resume_from_checkpoint=resume)
     log(f"training finished in {time.time() - train_start:.1f}s")
-    log("saving model...")
-    trainer.save_model(str(output / "final"))
-    tokenizer.save_pretrained(output / "final")
+    if args.no_final_save:
+        log("skipping final model export (--no-final-save)")
+    else:
+        log("saving model...")
+        trainer.save_model(str(output / "final"))
+        if trainer.is_world_process_zero():
+            tokenizer.save_pretrained(output / "final")
     trainer.save_metrics("train", result.metrics)
     trainer.save_state()
-    log(f"model saved to {output / 'final'}")
+    distributed_state.wait_for_everyone()
+    if not args.no_final_save:
+        log(f"model saved to {output / 'final'}")
 
 
 if __name__ == "__main__":

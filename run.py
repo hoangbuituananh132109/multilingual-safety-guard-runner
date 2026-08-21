@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -272,11 +273,136 @@ def likelihood(config: dict[str, Any], model: dict[str, Any], checkpoint: str, m
     execute(command, dry_run)
 
 
-def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str, resume: bool, dry_run: bool, no_checkpoints: bool = False) -> None:
+def distributed_training_command(
+    script: Path,
+    script_args: list[str],
+    gpus: int,
+    nnodes: int,
+    node_rank: int,
+    master_addr: str | None,
+    master_port: int,
+) -> list[str]:
+    if gpus < 1:
+        raise ValueError("--gpus must be at least 1")
+    if nnodes < 1:
+        raise ValueError("--nnodes must be at least 1")
+    if not 0 <= node_rank < nnodes:
+        raise ValueError("--node-rank must be between 0 and nnodes-1")
+    if gpus == 1 and nnodes == 1:
+        return [sys.executable, str(script), *script_args]
+    launcher = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        f"--nnodes={nnodes}",
+        f"--nproc-per-node={gpus}",
+    ]
+    if nnodes == 1:
+        launcher.append("--standalone")
+    else:
+        if not master_addr:
+            raise ValueError("--master-addr is required when --nnodes is greater than 1")
+        launcher.extend([
+            f"--node-rank={node_rank}",
+            f"--master-addr={master_addr}",
+            f"--master-port={master_port}",
+        ])
+    return [*launcher, str(script), *script_args]
+
+
+def write_training_config(path: Path, generated: dict[str, Any], dry_run: bool, nnodes: int, node_rank: int) -> None:
+    if dry_run:
+        return
+    content = yaml.safe_dump(generated, sort_keys=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if nnodes == 1 or node_rank == 0:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, path)
+        return
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        if path.is_file() and path.read_text(encoding="utf-8") == content:
+            return
+        time.sleep(1)
+    raise TimeoutError(f"Timed out waiting for node 0 to write {path}")
+
+
+def apply_training_overrides(
+    settings: dict[str, Any],
+    *,
+    per_device_batch_size: int | None,
+    gradient_accumulation_steps: int | None,
+    epochs: float | None,
+    learning_rate: float | None,
+    save_steps: int | None,
+    save_total_limit: int | None,
+    max_length: int | None,
+    optimizer: str | None,
+) -> None:
+    positive_ints = {
+        "per_device_batch_size": per_device_batch_size,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "save_steps": save_steps,
+        "save_total_limit": save_total_limit,
+        "max_length": max_length,
+    }
+    for key, value in positive_ints.items():
+        if value is not None:
+            if value < 1:
+                raise ValueError(f"--{key.replace('_', '-')} must be at least 1")
+            settings[key] = value
+    if epochs is not None:
+        if epochs <= 0:
+            raise ValueError("--epochs must be greater than 0")
+        settings["epochs"] = epochs
+    if learning_rate is not None:
+        if learning_rate <= 0:
+            raise ValueError("--learning-rate must be greater than 0")
+        settings["learning_rate"] = learning_rate
+    if optimizer is not None:
+        settings["optim"] = optimizer
+
+
+def train(
+    config: dict[str, Any],
+    model: dict[str, Any],
+    method: str,
+    mode: str,
+    resume: bool,
+    dry_run: bool,
+    no_checkpoints: bool = False,
+    gpus: int = 1,
+    nnodes: int = 1,
+    node_rank: int = 0,
+    master_addr: str | None = None,
+    master_port: int = 29500,
+    per_device_batch_size: int | None = None,
+    gradient_accumulation_steps: int | None = None,
+    epochs: float | None = None,
+    learning_rate: float | None = None,
+    save_steps: int | None = None,
+    save_total_limit: int | None = None,
+    max_length: int | None = None,
+    optimizer: str | None = None,
+    vram_fraction: float | None = None,
+    no_final_save: bool = False,
+) -> None:
     output = run_root(config, model, method, mode)
     common = dict(config["training"]["common"])
     method_settings = dict(config["training"][method])
     settings = {**common, **method_settings}
+    apply_training_overrides(
+        settings,
+        per_device_batch_size=per_device_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        save_steps=save_steps,
+        save_total_limit=save_total_limit,
+        max_length=max_length,
+        optimizer=optimizer,
+    )
     model_settings: dict[str, Any] = {
         "id": model_id(config, model),
         "revision": model.get("revision"),
@@ -305,30 +431,69 @@ def train(config: dict[str, Any], model: dict[str, Any], method: str, mode: str,
         "output_dir": str(output),
     }
     generated_path = output / "train_config.yaml"
-    if not dry_run:
-        output.mkdir(parents=True, exist_ok=True)
-        generated_path.write_text(yaml.safe_dump(generated, sort_keys=False), encoding="utf-8")
-    command = [sys.executable, str(CORE / "train.py"), "--config", str(generated_path)]
+    write_training_config(generated_path, generated, dry_run, nnodes, node_rank)
+    script_args = ["--config", str(generated_path)]
     # Skip eval during training by default: eval on the full valid set is very
     # expensive and makes training look stuck. Run eval separately afterwards.
-    command.append("--skip-eval")
+    script_args.append("--skip-eval")
     if no_checkpoints:
-        command.append("--no-checkpoints")
+        script_args.append("--no-checkpoints")
+    if no_final_save:
+        script_args.append("--no-final-save")
+    if vram_fraction is not None:
+        if not 0.0 < vram_fraction <= 1.0:
+            raise ValueError("--vram-fraction must be greater than 0 and at most 1")
+        script_args.extend(["--vram-fraction", str(vram_fraction)])
     if mode == "smoke":
-        command.extend(["--max-steps", str(settings["smoke_max_steps"])])
+        script_args.extend(["--max-steps", str(settings["smoke_max_steps"])])
     elif mode == "pilot":
-        command.extend(["--max-steps", str(settings["pilot_max_steps"])])
+        script_args.extend(["--max-steps", str(settings["pilot_max_steps"])])
     if resume:
-        command.append("--resume")
+        script_args.append("--resume")
+    command = distributed_training_command(CORE / "train.py", script_args, gpus, nnodes, node_rank, master_addr, master_port)
     execute(command, dry_run)
 
 
-def train_qwen35(config: dict[str, Any], model: dict[str, Any], method: str, mode: str, resume: bool, dry_run: bool) -> None:
+def train_qwen35(
+    config: dict[str, Any],
+    model: dict[str, Any],
+    method: str,
+    mode: str,
+    resume: bool,
+    dry_run: bool,
+    gpus: int = 1,
+    nnodes: int = 1,
+    node_rank: int = 0,
+    master_addr: str | None = None,
+    master_port: int = 29500,
+    per_device_batch_size: int | None = None,
+    gradient_accumulation_steps: int | None = None,
+    epochs: float | None = None,
+    learning_rate: float | None = None,
+    save_steps: int | None = None,
+    save_total_limit: int | None = None,
+    max_length: int | None = None,
+    optimizer: str | None = None,
+    vram_fraction: float | None = None,
+    no_checkpoints: bool = False,
+    no_final_save: bool = False,
+) -> None:
     """Train a multimodal Qwen3.5-4B text-only via the standalone trainer."""
     output = run_root(config, model, method, mode)
     common = dict(config["training"]["common"])
     method_settings = dict(config["training"][method])
     settings = {**common, **method_settings}
+    apply_training_overrides(
+        settings,
+        per_device_batch_size=per_device_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        save_steps=save_steps,
+        save_total_limit=save_total_limit,
+        max_length=max_length,
+        optimizer=optimizer,
+    )
     model_settings: dict[str, Any] = {
         "id": model_id(config, model),
         "revision": model.get("revision"),
@@ -357,16 +522,23 @@ def train_qwen35(config: dict[str, Any], model: dict[str, Any], method: str, mod
         "output_dir": str(output),
     }
     generated_path = output / "train_config.yaml"
-    if not dry_run:
-        output.mkdir(parents=True, exist_ok=True)
-        generated_path.write_text(yaml.safe_dump(generated, sort_keys=False), encoding="utf-8")
-    command = [sys.executable, str(ROOT / "train_qwen35.py"), "--config", str(generated_path)]
+    write_training_config(generated_path, generated, dry_run, nnodes, node_rank)
+    script_args = ["--config", str(generated_path)]
+    if no_checkpoints:
+        script_args.append("--no-checkpoints")
+    if no_final_save:
+        script_args.append("--no-final-save")
+    if vram_fraction is not None:
+        if not 0.0 < vram_fraction <= 1.0:
+            raise ValueError("--vram-fraction must be greater than 0 and at most 1")
+        script_args.extend(["--vram-fraction", str(vram_fraction)])
     if mode == "smoke":
-        command.extend(["--max-steps", str(settings["smoke_max_steps"])])
+        script_args.extend(["--max-steps", str(settings["smoke_max_steps"])])
     elif mode == "pilot":
-        command.extend(["--max-steps", str(settings["pilot_max_steps"])])
+        script_args.extend(["--max-steps", str(settings["pilot_max_steps"])])
     if resume:
-        command.append("--resume")
+        script_args.append("--resume")
+    command = distributed_training_command(ROOT / "train_qwen35.py", script_args, gpus, nnodes, node_rank, master_addr, master_port)
     execute(command, dry_run)
 
 
@@ -428,11 +600,35 @@ def main() -> None:
     train_parser.add_argument("--mode", choices=["smoke", "pilot", "full"], default="smoke")
     train_parser.add_argument("--resume", action="store_true")
     train_parser.add_argument("--no-checkpoints", action="store_true", help="Only save final model, skip periodic checkpoints")
+    train_parser.add_argument("--gpus", type=int, default=1)
+    train_parser.add_argument("--nnodes", type=int, default=1)
+    train_parser.add_argument("--node-rank", type=int, default=0)
+    train_parser.add_argument("--master-addr")
+    train_parser.add_argument("--master-port", type=int, default=29500)
+    train_parser.add_argument("--per-device-batch-size", type=int)
+    train_parser.add_argument("--gradient-accumulation-steps", type=int)
     train35_parser = subparsers.add_parser("train_qwen35")
     train35_parser.add_argument("--model", required=True)
     train35_parser.add_argument("--method", choices=["lora", "full"], default="lora")
     train35_parser.add_argument("--mode", choices=["smoke", "pilot", "full"], default="smoke")
     train35_parser.add_argument("--resume", action="store_true")
+    train35_parser.add_argument("--gpus", type=int, default=1)
+    train35_parser.add_argument("--nnodes", type=int, default=1)
+    train35_parser.add_argument("--node-rank", type=int, default=0)
+    train35_parser.add_argument("--master-addr")
+    train35_parser.add_argument("--master-port", type=int, default=29500)
+    train35_parser.add_argument("--per-device-batch-size", type=int)
+    train35_parser.add_argument("--gradient-accumulation-steps", type=int)
+    train35_parser.add_argument("--no-checkpoints", action="store_true", help="Disable periodic checkpoints for disposable smoke/probe runs")
+    for value in (train_parser, train35_parser):
+        value.add_argument("--epochs", type=float)
+        value.add_argument("--learning-rate", type=float)
+        value.add_argument("--save-steps", type=int)
+        value.add_argument("--save-total-limit", type=int)
+        value.add_argument("--max-length", type=int)
+        value.add_argument("--optimizer", choices=["adamw_torch", "adamw_torch_fused"])
+        value.add_argument("--vram-fraction", type=float)
+        value.add_argument("--no-final-save", action="store_true", help="Skip final model export; only for disposable probes")
     args = parser.parse_args()
     config_path = args.config.resolve()
     config = load_config(config_path)
@@ -517,9 +713,55 @@ def main() -> None:
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":
-            train(config, model, args.method, args.mode, args.resume, args.dry_run, getattr(args, "no_checkpoints", False))
+            train(
+                config,
+                model,
+                args.method,
+                args.mode,
+                args.resume,
+                args.dry_run,
+                getattr(args, "no_checkpoints", False),
+                args.gpus,
+                args.nnodes,
+                args.node_rank,
+                args.master_addr,
+                args.master_port,
+                args.per_device_batch_size,
+                args.gradient_accumulation_steps,
+                args.epochs,
+                args.learning_rate,
+                args.save_steps,
+                args.save_total_limit,
+                args.max_length,
+                args.optimizer,
+                args.vram_fraction,
+                args.no_final_save,
+            )
         elif args.command == "train_qwen35":
-            train_qwen35(config, model, args.method, args.mode, args.resume, args.dry_run)
+            train_qwen35(
+                config,
+                model,
+                args.method,
+                args.mode,
+                args.resume,
+                args.dry_run,
+                args.gpus,
+                args.nnodes,
+                args.node_rank,
+                args.master_addr,
+                args.master_port,
+                args.per_device_batch_size,
+                args.gradient_accumulation_steps,
+                args.epochs,
+                args.learning_rate,
+                args.save_steps,
+                args.save_total_limit,
+                args.max_length,
+                args.optimizer,
+                args.vram_fraction,
+                args.no_checkpoints,
+                args.no_final_save,
+            )
 
 
 if __name__ == "__main__":

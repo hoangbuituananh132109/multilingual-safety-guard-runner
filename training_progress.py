@@ -41,12 +41,16 @@ def checkpoints(run_dir: Path) -> list[Path]:
 
 def load_state(run_dir: Path) -> tuple[dict[str, Any], Path | None]:
     candidates = [run_dir / "trainer_state.json"]
-    candidates.extend(path / "trainer_state.json" for path in reversed(checkpoints(run_dir)))
+    candidates.extend(path / "trainer_state.json" for path in checkpoints(run_dir))
+    states: list[tuple[int, float, dict[str, Any], Path]] = []
     for path in candidates:
         if path.is_file():
             value = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(value, dict):
-                return value, path
+                states.append((int(value.get("global_step") or 0), path.stat().st_mtime, value, path))
+    if states:
+        _, _, value, path = max(states, key=lambda item: (item[0], item[1]))
+        return value, path
     return {}, None
 
 
