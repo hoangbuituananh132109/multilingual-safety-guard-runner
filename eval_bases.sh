@@ -9,6 +9,7 @@ export MODEL_PATH_QWEN3_8B="${MODEL_PATH_QWEN3_8B:-/workspace/storage-shared/mod
 export MODEL_PATH_LLAMA31_8B_INSTRUCT="${MODEL_PATH_LLAMA31_8B_INSTRUCT:-/workspace/storage-shared/models/Llama-3.1-8B-Instruct}"
 
 PY="python3"
+unset VLLM_ATTENTION_BACKEND FLASHINFER_DISABLE_VERSION_CHECK || true
 if pgrep -f '[c]ore/train.py --config runs/qwen3_8b/lora_full/train_config.yaml' >/dev/null; then
   echo "Qwen3-8B training is still running. Stop it before base eval." >&2
   exit 3

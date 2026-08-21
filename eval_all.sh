@@ -15,6 +15,7 @@ export MODEL_PATH_LLAMA31_8B_INSTRUCT="${MODEL_PATH_LLAMA31_8B_INSTRUCT:-/worksp
 export MODEL_PATH_LLAMA31_NEMOTRON="${MODEL_PATH_LLAMA31_NEMOTRON:-/workspace/storage-shared/nlp/huypq51/models/Llama-3.1-Nemotron-Safety-Guard-8B-v3}"
 
 PY="python3"
+unset VLLM_ATTENTION_BACKEND FLASHINFER_DISABLE_VERSION_CHECK || true
 if pgrep -f '[c]ore/train.py --config runs/qwen3_8b/lora_full/train_config.yaml' >/dev/null; then
   echo "Qwen3-8B training is still running. Stop it before eval." >&2
   exit 3
