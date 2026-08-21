@@ -334,7 +334,6 @@ def main() -> None:
             dtype="bfloat16",
             enforce_eager=True,
             gpu_memory_utilization=args.gpu_memory_utilization,
-            max_model_len=args.max_input_tokens + args.max_new_tokens,
         )
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
         sampling = SamplingParams(max_tokens=args.max_new_tokens, temperature=0.0, top_p=1.0)
