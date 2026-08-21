@@ -35,7 +35,7 @@ benchmarks:
   - ja
   - zh
 evaluation:
-  backend: transformers
+  backend: vllm
   gpu_memory_utilization: 0.6
   batch_size: 4
   vllm_chunk_size: 1000

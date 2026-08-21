@@ -27,6 +27,7 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
+    parser.add_argument("--adapter-sha256")
     args = parser.parse_args()
 
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[args.dtype]
@@ -60,6 +61,7 @@ def main() -> None:
     manifest = {
         "base_model": args.base_model,
         "adapter": str(args.adapter),
+        "adapter_sha256": args.adapter_sha256,
         "dtype": args.dtype,
         "output": str(args.output),
     }

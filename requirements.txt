@@ -10,7 +10,6 @@ scikit-learn==1.9.0
 pyyaml==6.0.3
 
 # Optional: vLLM backend for fast evaluation. Pick the version matching your torch:
-#   torch 2.11.0+cu130 -> vllm==0.22.0
+#   torch 2.11.0+cu130 -> vllm==0.23.0 (FlashInfer 0.6.12 pair)
 #   torch 2.13.0+cu130 -> vllm==0.27.1
-# Requires ninja-build for flashinfer JIT kernels.
-# vllm==0.22.0
+# vllm==0.23.0

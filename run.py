@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -157,16 +159,41 @@ def evaluation_source(config: dict[str, Any], model: dict[str, Any], checkpoint:
 
 
 
-def merged_adapter_path(base_model: str, adapter: Path, runs_root: Path, model_name: str, method: str, mode: str) -> Path:
+def adapter_signature(adapter: Path) -> str:
+    """Hash the PEFT config and weights used to build a merged vLLM model."""
+    files = [adapter / "adapter_config.json", *sorted(adapter.glob("adapter_model.*"))]
+    files = [path for path in files if path.is_file()]
+    if not files:
+        raise FileNotFoundError(f"No LoRA adapter files found under {adapter}")
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.name.encode("utf-8"))
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
+def merged_adapter_path(base_model: str, adapter: Path, destination: Path, dry_run: bool) -> Path:
     """Return (and lazily create) a merged weights dir for a LoRA adapter.
 
     vLLM cannot load a PeftModel directly, so for after+lora eval we merge the
     adapter into the base weights once and point vLLM at the merged dir.
     """
-    merged = runs_root / model_name / f"{method}_{mode}" / "merged"
+    merged = destination / "merged"
     marker = merged / "merge_manifest.json"
-    if marker.is_file():
+    if dry_run:
         return merged
+    signature = adapter_signature(adapter)
+    if marker.is_file():
+        try:
+            manifest = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        if manifest.get("base_model") == base_model and manifest.get("adapter_sha256") == signature:
+            return merged
+        print(f"adapter changed; rebuilding stale merged model at {merged}", flush=True)
+        shutil.rmtree(merged)
     print(f"merging LoRA adapter {adapter} into {merged} for vLLM eval...", flush=True)
     execute([
         sys.executable,
@@ -174,13 +201,14 @@ def merged_adapter_path(base_model: str, adapter: Path, runs_root: Path, model_n
         "--base-model", base_model,
         "--adapter", str(adapter),
         "--output", str(merged),
+        "--adapter-sha256", signature,
     ], dry_run=False)
     return merged
 
 def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers") -> None:
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     if backend == "vllm" and adapter is not None:
-        merged = merged_adapter_path(base_model, adapter, Path(config["paths"]["runs_root"]), str(model["name"]), method, mode)
+        merged = merged_adapter_path(base_model, adapter, destination, dry_run)
         base_model = str(merged)
         adapter = None
     command = [
@@ -380,7 +408,7 @@ def main() -> None:
         value.add_argument("--limit", type=int)
         value.add_argument("--sample", type=int)
         if command == "evaluate":
-            value.add_argument("--backend", choices=["transformers", "vllm"], default="transformers")
+            value.add_argument("--backend", choices=["transformers", "vllm"])
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", required=True)
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -470,7 +498,8 @@ def main() -> None:
     else:
         model = selected_model(config, args.model)
         if args.command == "evaluate":
-            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, getattr(args, "backend", "transformers"))
+            backend = args.backend or str(config["evaluation"].get("backend", "transformers"))
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend)
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":

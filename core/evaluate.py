@@ -316,10 +316,6 @@ def main() -> None:
             log(f"  [{name}] {action} {len(rows)} rows in {time.time()-bench_start:.0f}s")
 
     if args.backend == "vllm" and vllm_batches:
-        # Force native PyTorch attention so vLLM does not try to JIT-compile
-        # flashinfer kernels (which fail without nvrtc.h on this box).
-        os.environ.setdefault("VLLM_ATTENTION_BACKEND", "TORCH_SDPA")
-
         total_prompts = sum(len(batch_rows) for _, batch_rows, _ in vllm_batches)
         log(f"running vLLM generation on {total_prompts} prompts in chunks of {args.vllm_chunk_size}...")
         write_progress(
@@ -333,7 +329,13 @@ def main() -> None:
         )
         from vllm import LLM, SamplingParams
         load_start = time.time()
-        vllm_llm = LLM(model=args.base_model, dtype="bfloat16", enforce_eager=True, gpu_memory_utilization=args.gpu_memory_utilization)
+        vllm_llm = LLM(
+            model=args.base_model,
+            dtype="bfloat16",
+            enforce_eager=True,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+            max_model_len=args.max_input_tokens + args.max_new_tokens,
+        )
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
         sampling = SamplingParams(max_tokens=args.max_new_tokens, temperature=0.0, top_p=1.0)
         generation_start = time.time()
