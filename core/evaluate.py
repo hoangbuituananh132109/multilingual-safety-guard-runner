@@ -155,6 +155,8 @@ def main() -> None:
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.92)
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"], default="greedy")
+    parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--backend", choices=["transformers", "vllm"], default="transformers")
     parser.add_argument("--limit", type=int)
@@ -263,8 +265,16 @@ def main() -> None:
                 )
                 continue
             encoded = tokenizer(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
+            generation_kwargs: dict[str, Any] = {
+                "max_new_tokens": args.max_new_tokens,
+                "pad_token_id": tokenizer.pad_token_id,
+            }
+            if args.decoding_profile == "nemotron_model_card":
+                generation_kwargs.update(do_sample=True, temperature=0.6, top_p=0.9)
+            else:
+                generation_kwargs["do_sample"] = False
             with torch.inference_mode():
-                generated = model.generate(**encoded, do_sample=False, max_new_tokens=args.max_new_tokens, pad_token_id=tokenizer.pad_token_id)
+                generated = model.generate(**encoded, **generation_kwargs)
             input_width = encoded["input_ids"].shape[1]
             for row, sequence in zip(batch_rows, generated):
                 raw = tokenizer.decode(sequence[input_width:], skip_special_tokens=True)
@@ -336,7 +346,20 @@ def main() -> None:
             gpu_memory_utilization=args.gpu_memory_utilization,
         )
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
-        sampling = SamplingParams(max_tokens=args.max_new_tokens, temperature=0.0, top_p=1.0)
+        if args.decoding_profile == "nemotron_model_card":
+            sampling = SamplingParams(
+                max_tokens=args.max_new_tokens,
+                temperature=0.6,
+                top_p=0.9,
+                seed=args.seed,
+            )
+        else:
+            sampling = SamplingParams(
+                max_tokens=args.max_new_tokens,
+                temperature=0.0,
+                top_p=1.0,
+                seed=args.seed,
+            )
         generation_start = time.time()
         total_completed = 0
         for name, batch_rows, prompts in vllm_batches:
@@ -424,6 +447,8 @@ def main() -> None:
         "adapter": str(args.adapter) if args.adapter else None,
         "family": args.family,
         "backend": args.backend,
+        "decoding_profile": args.decoding_profile,
+        "seed": args.seed,
         "parse_error_policy": args.parse_error_policy,
         "prompt_template_sha256": hashlib.sha256(NEMOTRON_PROMPT_TEMPLATE.encode("utf-8")).hexdigest() if args.family == "nemotron" else None,
         "protocol_note": "SEA rows evaluated with the configured model-native guard prompt; this is not the official SEA-HELM prompt/leaderboard protocol.",

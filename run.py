@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -144,6 +145,13 @@ def benchmark_args(config: dict[str, Any]) -> list[str]:
         ("sea_vi", "sea_safeguard_vi.jsonl"),
     ):
         result.extend(["--benchmark", f"{name}={root / filename}"])
+    for name, filename in (
+        ("polyguard_prompts", "polyguard_prompts_9lang.jsonl"),
+        ("multijail", "multijail_4lang.jsonl"),
+    ):
+        path = root / filename
+        if path.is_file():
+            result.extend(["--benchmark", f"{name}={path}"])
     return result
 
 
@@ -205,7 +213,9 @@ def merged_adapter_path(base_model: str, adapter: Path, destination: Path, dry_r
     ], dry_run=False)
     return merged
 
-def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers") -> None:
+def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers", decoding_profile: str = "greedy", output_tag: str = "guard") -> None:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", output_tag):
+        raise ValueError("--output-tag may contain only letters, numbers, dot, underscore, and dash")
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
     if backend == "vllm" and adapter is not None:
         merged = merged_adapter_path(base_model, adapter, destination, dry_run)
@@ -217,11 +227,12 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         "--base-model", base_model,
         *revisions,
         "--family", str(model["family"]),
-        "--output-dir", str(destination / "guard"),
+        "--output-dir", str(destination / output_tag),
         "--batch-size", str(config["evaluation"]["batch_size"]),
         "--vllm-chunk-size", str(config["evaluation"].get("vllm_chunk_size", 1000)),
         "--gpu-memory-utilization", str(config["evaluation"].get("gpu_memory_utilization", 0.92)),
         "--backend", backend,
+        "--decoding-profile", decoding_profile,
         *benchmark_args(config),
     ]
     if adapter is not None:
@@ -394,7 +405,7 @@ def main() -> None:
     unpack_parser.add_argument("--strict", action="store_true")
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--limit", type=int, default=0)
-    nvidia_parser = subparsers.add_parser("nvidia-report", help="NVIDIA-compatible average harmful-F1 report from a run's guard metrics.")
+    nvidia_parser = subparsers.add_parser("nvidia-report", help="Paper-aligned harmful-F1/recall summary from a run's guard metrics.")
     nvidia_parser.add_argument("--model", required=True)
     nvidia_parser.add_argument("--checkpoint", choices=["before", "after"], default="before")
     nvidia_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -409,6 +420,8 @@ def main() -> None:
         value.add_argument("--sample", type=int)
         if command == "evaluate":
             value.add_argument("--backend", choices=["transformers", "vllm"])
+            value.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"])
+            value.add_argument("--output-tag", default="guard")
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", required=True)
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -499,7 +512,8 @@ def main() -> None:
         model = selected_model(config, args.model)
         if args.command == "evaluate":
             backend = args.backend or str(config["evaluation"].get("backend", "transformers"))
-            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend)
+            decoding_profile = args.decoding_profile or str(config["evaluation"].get("decoding_profile", "greedy"))
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend, decoding_profile, args.output_tag)
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":

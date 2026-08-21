@@ -24,8 +24,7 @@ benchmarks:
   xsafety_root: input/xsafety
   xsafety_revision: 8c55b6a6cda594cd550a4921513238a2dd40eb5a
   output_dir: work/benchmarks
-  # XSafety languages matching paper Table 15 (harmful-F1): en ar de fr hi ja zh.
-  # NOTE: paper Table 16 (harmful-recall) uses 9 langs (adds es, th).
+  # XSafety languages used by paper Tables 15-16: en ar de fr hi ja zh.
   xsafety_languages:
   - en
   - ar
@@ -36,6 +35,7 @@ benchmarks:
   - zh
 evaluation:
   backend: vllm
+  decoding_profile: greedy
   gpu_memory_utilization: 0.6
   batch_size: 4
   vllm_chunk_size: 1000

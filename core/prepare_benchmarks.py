@@ -97,7 +97,9 @@ def xsafety_rows(root: Path, languages: list[str]) -> Iterable[dict[str, Any]]:
         language_root = root / directory_name
         if not language_root.exists():
             raise FileNotFoundError(f"XSafety language directory is missing: {language_root}")
-        files = sorted(path for path in language_root.glob("*.csv") if "sense" not in path.stem.lower())
+        files = sorted(language_root.glob("*.csv"))
+        if any(path.stem.casefold() == "commonsense" for path in files):
+            files = [path for path in files if path.stem.casefold() != "commen_sense"]
         if not files:
             raise FileNotFoundError(f"No XSafety CSV files found in {language_root}")
         for source_path in files:
@@ -184,6 +186,13 @@ def main() -> None:
         outputs["xsafety"],
         xsafety_rows(xsafety_root, args.xsafety_languages),
     )
+    expected_xsafety_examples = 2800 * len(args.xsafety_languages)
+    actual_xsafety_examples = manifest["benchmarks"]["xsafety"]["examples"]
+    if actual_xsafety_examples != expected_xsafety_examples:
+        raise ValueError(
+            f"XSafety row count mismatch: expected {expected_xsafety_examples} "
+            f"(2800 per language), got {actual_xsafety_examples}"
+        )
     manifest_path = args.output_dir / "benchmark_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

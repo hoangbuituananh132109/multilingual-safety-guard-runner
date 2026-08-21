@@ -12,7 +12,7 @@ Luu y: moi sample Nemotron duoc tach thanh 2 dong (P = prompt, PR = prompt+respo
 nen so dong trong file lon gap ~2 so sample. De doi chieu voi paper:
 - CultureGuard standard: ~17,676 sample (paper)
 - CultureGuard-JB: ~8,883 sample (paper)
-- XSafety: chi unsafe prompts, 7 nguoi ngu (paper Table 15)
+- XSafety: 19,600 unsafe prompts = 7 nguoi ngu x 2,800 (14 category, gom commonsense)
 - SEA-VI: ~1,840 dong
 
 Neu so dong lech bat thuong (vi du standard + jb khong xap xi 26,559 sample),
