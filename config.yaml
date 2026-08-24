@@ -37,6 +37,7 @@ evaluation:
   backend: vllm
   decoding_profile: greedy
   gpu_memory_utilization: 0.6
+  tensor_parallel_size: 1
   batch_size: 4
   vllm_chunk_size: 1000
   load_in_4bit: false

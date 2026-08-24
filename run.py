@@ -214,7 +214,7 @@ def merged_adapter_path(base_model: str, adapter: Path, destination: Path, dry_r
     ], dry_run=False)
     return merged
 
-def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers", decoding_profile: str = "greedy", output_tag: str = "guard") -> None:
+def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers", decoding_profile: str = "greedy", output_tag: str = "guard", tensor_parallel_size: int = 1) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", output_tag):
         raise ValueError("--output-tag may contain only letters, numbers, dot, underscore, and dash")
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
@@ -232,6 +232,7 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         "--batch-size", str(config["evaluation"]["batch_size"]),
         "--vllm-chunk-size", str(config["evaluation"].get("vllm_chunk_size", 1000)),
         "--gpu-memory-utilization", str(config["evaluation"].get("gpu_memory_utilization", 0.92)),
+        "--tensor-parallel-size", str(tensor_parallel_size),
         "--backend", backend,
         "--decoding-profile", decoding_profile,
         *benchmark_args(config),
@@ -594,6 +595,7 @@ def main() -> None:
             value.add_argument("--backend", choices=["transformers", "vllm"])
             value.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"])
             value.add_argument("--output-tag", default="guard")
+            value.add_argument("--gpus", type=int, default=1)
     train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--model", required=True)
     train_parser.add_argument("--method", choices=["lora", "full"], default="lora")
@@ -709,7 +711,7 @@ def main() -> None:
         if args.command == "evaluate":
             backend = args.backend or str(config["evaluation"].get("backend", "transformers"))
             decoding_profile = args.decoding_profile or str(config["evaluation"].get("decoding_profile", "greedy"))
-            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend, decoding_profile, args.output_tag)
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend, decoding_profile, args.output_tag, getattr(args, "gpus", 1))
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":

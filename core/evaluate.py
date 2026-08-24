@@ -153,6 +153,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--vllm-chunk-size", type=int, default=1000)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.92)
+    parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"], default="greedy")
@@ -343,6 +344,7 @@ def main() -> None:
             model=args.base_model,
             dtype="bfloat16",
             enforce_eager=True,
+            tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
         )
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
