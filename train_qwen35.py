@@ -85,7 +85,7 @@ def load_model_and_tokenizer(model_path: str):
         log("no vision component detected; treating as text-only model")
 
     log(f"model loaded in {time.time()-load_start:.1f}s, {vram_mb()}")
-    return model, tokenizer
+    return model, tokenizer, bool(frozen)
 
 
 def main() -> None:
@@ -108,7 +108,7 @@ def main() -> None:
     log(f"train={data_cfg['train']} validation={data_cfg['validation']} max_length={data_cfg['max_length']}")
     log(f"epochs={train_cfg['epochs']} lr={train_cfg['learning_rate']} batch={train_cfg['per_device_batch_size']} grad_accum={train_cfg['gradient_accumulation_steps']} max_steps={args.max_steps}")
 
-    model, tokenizer = load_model_and_tokenizer(model_cfg["id"])
+    model, tokenizer, has_frozen_vision = load_model_and_tokenizer(model_cfg["id"])
 
     if model_cfg["tuning"] == "lora":
         log(f"wrapping with LoRA (r={model_cfg['lora_r']}, alpha={model_cfg['lora_alpha']}, dropout={model_cfg['lora_dropout']})...")
@@ -174,7 +174,7 @@ def main() -> None:
         gradient_checkpointing=bool(train_cfg["gradient_checkpointing"]), gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=int(train_cfg["logging_steps"]), save_steps=int(train_cfg["save_steps"]), eval_steps=int(train_cfg["eval_steps"]),
         eval_strategy="no", save_strategy="no" if args.no_checkpoints else "steps", save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
-        report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=True,
+        report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=has_frozen_vision,
         remove_unused_columns=False, label_names=["labels"], save_safetensors=True,
     )
     if train_cfg.get("optim"):
