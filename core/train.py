@@ -23,7 +23,10 @@ from transformers import (
     TrainingArguments,
 )
 
-from prompt import N23, render_prompt
+try:
+    from .prompt import N23, render_prompt
+except ImportError:
+    from prompt import N23, render_prompt
 
 
 def log(message: str) -> None:
