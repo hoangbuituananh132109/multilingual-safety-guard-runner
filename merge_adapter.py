@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import tempfile
 import time
 from pathlib import Path
 
@@ -25,32 +24,30 @@ def log(message: str) -> None:
 
 
 def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa"):
-    """Try Qwen3.5 multimodal first, fallback to CausalLM. Handles CPU offload."""
-    # Use offload dir on D:\ to avoid C: and to support CPU dispatch
-    offload_dir = None
+    """Try Qwen3.5 multimodal first, fallback to CausalLM."""
+    # On CPU-only machines, force CPU to avoid meta-offload dispatch issues with PEFT
     if not torch.cuda.is_available():
-        # CPU-only machine like laptop: need disk offload for 4B
-        offload_dir = str(Path("D:/Downloads/Safety Dataset/tmp/offload"))
-        Path(offload_dir).mkdir(parents=True, exist_ok=True)
-        log(f"no CUDA, using CPU offload_dir={offload_dir}")
+        log("no CUDA, forcing device_map=cpu (no offload)")
+        try:
+            m = AutoModelForImageTextToText.from_pretrained(base_model, torch_dtype=dtype, device_map="cpu", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
+            log(f"loaded via AutoModelForImageTextToText ({type(m).__name__}) on CPU")
+            return m
+        except Exception as e:
+            log(f"ImageTextToText CPU load failed ({e}), trying CausalLM cpu...")
+        m = AutoModelForCausalLM.from_pretrained(base_model, torch_dtype=dtype, device_map="cpu", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
+        log(f"loaded via AutoModelForCausalLM ({type(m).__name__}) on CPU")
+        return m
 
-    # 1) Try ImageTextToText (Qwen3.5-4B is Qwen3_5ForConditionalGeneration)
+    # GPU available: use auto with offload on D:\
+    offload_dir = str(Path("D:/Downloads/Safety Dataset/tmp/offload"))
+    Path(offload_dir).mkdir(parents=True, exist_ok=True)
     try:
-        kwargs = dict(torch_dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
-        if offload_dir:
-            kwargs["offload_folder"] = offload_dir
-            kwargs["offload_state_dict"] = True
-        m = AutoModelForImageTextToText.from_pretrained(base_model, **kwargs)
+        m = AutoModelForImageTextToText.from_pretrained(base_model, torch_dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True, offload_folder=offload_dir, offload_state_dict=True)
         log(f"loaded via AutoModelForImageTextToText ({type(m).__name__})")
         return m
     except Exception as e:
-        log(f"ImageTextToText load failed ({e}), trying AutoModelForCausalLM...")
-    # 2) Fallback CausalLM
-    kwargs = dict(torch_dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
-    if offload_dir:
-        kwargs["offload_folder"] = offload_dir
-        kwargs["offload_state_dict"] = True
-    m = AutoModelForCausalLM.from_pretrained(base_model, **kwargs)
+        log(f"ImageTextToText load failed ({e}), trying CausalLM...")
+    m = AutoModelForCausalLM.from_pretrained(base_model, torch_dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True, offload_folder=offload_dir, offload_state_dict=True)
     log(f"loaded via AutoModelForCausalLM ({type(m).__name__})")
     return m
 
@@ -84,7 +81,17 @@ def main() -> None:
                     log(f"adapter mean_abs={mean_abs:.6f} ({len(ks)} tensors) - ~0 means LoRA not trained")
     except Exception as e:
         log(f"adapter norm check skip: {e}")
-    model = PeftModel.from_pretrained(model, args.adapter)
+    # PEFT dispatch on CPU should not need offload when base is on cpu
+    try:
+        model = PeftModel.from_pretrained(model, args.adapter)
+    except ValueError as e:
+        if "offload_dir" in str(e):
+            log(f"Peft offload error, retry with offload_folder on D:\\...")
+            offload_dir = str(Path("D:/Downloads/Safety Dataset/tmp/offload"))
+            Path(offload_dir).mkdir(parents=True, exist_ok=True)
+            model = PeftModel.from_pretrained(model, args.adapter, offload_folder=offload_dir)
+        else:
+            raise
     log(f"adapter loaded in {time.time()-start:.1f}s")
 
     log("merging adapter into base weights...")
