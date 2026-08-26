@@ -5,11 +5,13 @@ Usage:
 
 Works for any HuggingFace causal LM (Llama, Qwen3, Qwen3.5 multimodal, Gemma).
 Fix for Qwen3.5-4B hybrid (Qwen3_5ForConditionalGeneration): tries ImageTextToText first.
+Handles CPU offload (needs offload_dir on machines without enough GPU RAM).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 import time
 from pathlib import Path
 
@@ -23,30 +25,32 @@ def log(message: str) -> None:
 
 
 def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa"):
-    """Try Qwen3.5 multimodal first, fallback to CausalLM. Handles trust_remote_code."""
+    """Try Qwen3.5 multimodal first, fallback to CausalLM. Handles CPU offload."""
+    # Use offload dir on D:\ to avoid C: and to support CPU dispatch
+    offload_dir = None
+    if not torch.cuda.is_available():
+        # CPU-only machine like laptop: need disk offload for 4B
+        offload_dir = str(Path("D:/Downloads/Safety Dataset/tmp/offload"))
+        Path(offload_dir).mkdir(parents=True, exist_ok=True)
+        log(f"no CUDA, using CPU offload_dir={offload_dir}")
+
     # 1) Try ImageTextToText (Qwen3.5-4B is Qwen3_5ForConditionalGeneration)
     try:
-        m = AutoModelForImageTextToText.from_pretrained(
-            base_model,
-            torch_dtype=dtype,
-            device_map="auto",
-            attn_implementation=attn_impl,
-            trust_remote_code=True,
-            low_cpu_mem_usage=True,
-        )
+        kwargs = dict(torch_dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
+        if offload_dir:
+            kwargs["offload_folder"] = offload_dir
+            kwargs["offload_state_dict"] = True
+        m = AutoModelForImageTextToText.from_pretrained(base_model, **kwargs)
         log(f"loaded via AutoModelForImageTextToText ({type(m).__name__})")
         return m
     except Exception as e:
         log(f"ImageTextToText load failed ({e}), trying AutoModelForCausalLM...")
     # 2) Fallback CausalLM
-    m = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        torch_dtype=dtype,
-        device_map="auto",
-        attn_implementation=attn_impl,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True,
-    )
+    kwargs = dict(torch_dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
+    if offload_dir:
+        kwargs["offload_folder"] = offload_dir
+        kwargs["offload_state_dict"] = True
+    m = AutoModelForCausalLM.from_pretrained(base_model, **kwargs)
     log(f"loaded via AutoModelForCausalLM ({type(m).__name__})")
     return m
 
@@ -69,7 +73,6 @@ def main() -> None:
 
     log(f"loading LoRA adapter from {args.adapter}...")
     start = time.time()
-    # Check adapter norm before merge (debug Qwen3.5 diff 0.0)
     try:
         from safetensors import safe_open
         ap = Path(args.adapter) / "adapter_model.safetensors"
@@ -88,13 +91,6 @@ def main() -> None:
     start = time.time()
     merged = model.merge_and_unload()
     log(f"merge done in {time.time()-start:.1f}s")
-    # Verify diff for Qwen3.5 (catch silent merge failure)
-    try:
-        # Compare one tensor if base still available via safetensors check after merge is not trivial,
-        # so we check that merged state dict differs from adapter 0
-        pass
-    except Exception:
-        pass
     merged = merged.to(dtype)
     merged.eval()
 
@@ -102,7 +98,6 @@ def main() -> None:
     log(f"saving merged model to {args.output}...")
     start = time.time()
     merged.save_pretrained(args.output, safe_serialization=True)
-    # tokenizer: adapter may have chat_template, else base
     tok_src = args.adapter / "tokenizer" if (args.adapter / "tokenizer").exists() else (args.adapter if (args.adapter / "tokenizer.json").exists() else args.base_model)
     try:
         tokenizer = AutoTokenizer.from_pretrained(tok_src, trust_remote_code=True)
