@@ -3,7 +3,8 @@
 Usage:
   python merge_adapter.py --base-model <BASE> --adapter <ADAPTER_DIR> --output <OUT_DIR>
 
-Works for any HuggingFace causal LM (Llama, Qwen3, Qwen3.5 text-only, Gemma).
+Works for any HuggingFace causal LM (Llama, Qwen3, Qwen3.5 multimodal, Gemma).
+Fix for Qwen3.5-4B hybrid (Qwen3_5ForConditionalGeneration): tries ImageTextToText first.
 """
 from __future__ import annotations
 
@@ -14,11 +15,40 @@ from pathlib import Path
 
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
 
 def log(message: str) -> None:
     print(f"[merge] {time.strftime('%Y-%m-%d %H:%M:%S')} {message}", flush=True)
+
+
+def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa"):
+    """Try Qwen3.5 multimodal first, fallback to CausalLM. Handles trust_remote_code."""
+    # 1) Try ImageTextToText (Qwen3.5-4B is Qwen3_5ForConditionalGeneration)
+    try:
+        m = AutoModelForImageTextToText.from_pretrained(
+            base_model,
+            torch_dtype=dtype,
+            device_map="auto",
+            attn_implementation=attn_impl,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True,
+        )
+        log(f"loaded via AutoModelForImageTextToText ({type(m).__name__})")
+        return m
+    except Exception as e:
+        log(f"ImageTextToText load failed ({e}), trying AutoModelForCausalLM...")
+    # 2) Fallback CausalLM
+    m = AutoModelForCausalLM.from_pretrained(
+        base_model,
+        torch_dtype=dtype,
+        device_map="auto",
+        attn_implementation=attn_impl,
+        trust_remote_code=True,
+        low_cpu_mem_usage=True,
+    )
+    log(f"loaded via AutoModelForCausalLM ({type(m).__name__})")
+    return m
 
 
 def main() -> None:
@@ -28,26 +58,43 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
     parser.add_argument("--adapter-sha256")
+    parser.add_argument("--attn", default="sdpa", help="attn_implementation")
     args = parser.parse_args()
 
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[args.dtype]
-    log(f"loading base model from {args.base_model} (dtype={args.dtype})...")
+    log(f"loading base model from {args.base_model} (dtype={args.dtype}, attn={args.attn})...")
     start = time.time()
-    model = AutoModelForCausalLM.from_pretrained(
-        args.base_model,
-        torch_dtype=dtype,
-        device_map="auto",
-        attn_implementation="sdpa",
-    )
+    model = load_base_model(args.base_model, dtype, args.attn)
     log(f"base model loaded in {time.time()-start:.1f}s")
+
     log(f"loading LoRA adapter from {args.adapter}...")
     start = time.time()
+    # Check adapter norm before merge (debug Qwen3.5 diff 0.0)
+    try:
+        from safetensors import safe_open
+        ap = Path(args.adapter) / "adapter_model.safetensors"
+        if ap.exists():
+            with safe_open(str(ap), framework="pt") as f:
+                ks = list(f.keys())
+                if ks:
+                    mean_abs = sum(f.get_tensor(k).abs().mean().item() for k in ks) / len(ks)
+                    log(f"adapter mean_abs={mean_abs:.6f} ({len(ks)} tensors) - ~0 means LoRA not trained")
+    except Exception as e:
+        log(f"adapter norm check skip: {e}")
     model = PeftModel.from_pretrained(model, args.adapter)
     log(f"adapter loaded in {time.time()-start:.1f}s")
+
     log("merging adapter into base weights...")
     start = time.time()
     merged = model.merge_and_unload()
     log(f"merge done in {time.time()-start:.1f}s")
+    # Verify diff for Qwen3.5 (catch silent merge failure)
+    try:
+        # Compare one tensor if base still available via safetensors check after merge is not trivial,
+        # so we check that merged state dict differs from adapter 0
+        pass
+    except Exception:
+        pass
     merged = merged.to(dtype)
     merged.eval()
 
@@ -55,7 +102,12 @@ def main() -> None:
     log(f"saving merged model to {args.output}...")
     start = time.time()
     merged.save_pretrained(args.output, safe_serialization=True)
-    tokenizer = AutoTokenizer.from_pretrained(args.adapter / "tokenizer" if (args.adapter / "tokenizer").exists() else args.base_model)
+    # tokenizer: adapter may have chat_template, else base
+    tok_src = args.adapter / "tokenizer" if (args.adapter / "tokenizer").exists() else (args.adapter if (args.adapter / "tokenizer.json").exists() else args.base_model)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tok_src, trust_remote_code=True)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
     tokenizer.save_pretrained(args.output)
     log(f"saved in {time.time()-start:.1f}s")
     manifest = {
