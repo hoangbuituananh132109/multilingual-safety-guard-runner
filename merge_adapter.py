@@ -14,6 +14,7 @@ import json
 import time
 from pathlib import Path
 import os, tempfile
+import pathlib
 
 import torch
 from peft import PeftModel
@@ -132,6 +133,19 @@ def main() -> None:
     except Exception:
         tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
     tokenizer.save_pretrained(args.output)
+    # copy processor/vocab extras for Qwen3.5 multimodal (needed for vLLM)
+    try:
+        base_path = pathlib.Path(args.base_model)
+        if base_path.is_dir():
+            for name in ["preprocessor_config.json", "video_preprocessor_config.json", "chat_template.jinja", "vocab.json", "merges.txt", "tokenizer_config.json", "generation_config.json"]:
+                src = base_path / name
+                dst = args.output / name
+                if src.exists() and not dst.exists():
+                    import shutil as _sh
+                    _sh.copy2(src, dst)
+                    log(f"copied {name} from base")
+    except Exception as e:
+        log(f"extra copy skip: {e}")
     log(f"saved in {time.time()-start:.1f}s")
     manifest = {
         "base_model": args.base_model,
