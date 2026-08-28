@@ -103,6 +103,24 @@ python3 stage2.py validate --data-dir work/stage2/full_gemini_bundle/data
 
 Bundle policy mới có WildGuard hiện đã tạo local tại `D:\Downloads\Safety Dataset\multilingual-safety-guard-runner\company-transfer\stage2_gemini_policy_training_ready.zip` và upload tại [HF offline-zips](https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips). Sau khi giải nén, dùng `stage2_train_qwen3_8b_bundle.yaml`; không đưa benchmark test vào archive hoặc HF dataset repo; bundle có WildGuard chỉ chia sẻ trong phạm vi đã được cấp phép.
 
+## 9. Ablation để tách đóng góp dữ liệu
+
+Giữ nguyên `MODEL_PATH_STAGE1_MERGED`, seed `3407`, LoRA, batch và benchmark
+protocol; chỉ thay dataset/config. Các bundle `stage2_ablation_vi_gemini.zip`
+và `stage2_ablation_reasoning_only.zip` đã nằm trong HF offline-zips.
+
+| Run | Data | Epoch | Config |
+|---|---|---:|---|
+| VI-1E | Gemini VI only | 1 | `stage2_train_qwen3_8b_vi_gemini_1epoch.yaml` |
+| VI-5E | Gemini VI only | 5 | `stage2_train_qwen3_8b_vi_gemini_5epoch.yaml` |
+| Reasoning-5E | Reasoning only, random THINK/NO-THINK | 5 | `stage2_train_qwen3_8b_reasoning_only_5epoch.yaml` |
+| Full-5E | V3 + VI + reasoning + N35 + WildGuard | 5 | `stage2_train_qwen3_8b_bundle.yaml` |
+
+Chỉ báo cáo hiệu quả sau khi đánh giá cùng một bộ benchmark, cùng decoding và
+tách rõ prompt-only/response-only; không so sánh loss giữa các run như metric
+chính. Để chạy một ablation, giải nén bundle tương ứng vào đúng thư mục mà
+YAML chỉ định rồi chạy GPU smoke 3 step trước full train.
+
 ```bash
 hf upload <ORG>/<DATASET_REPO> stage2_bundle.zip stage2_bundle.zip --repo-type dataset
 ```

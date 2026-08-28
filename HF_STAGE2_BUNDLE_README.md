@@ -30,6 +30,11 @@ taxonomy ON/OFF where an N23 category exists; reasoning uses deterministic
 taxonomy-OFF. THINK targets use Qwen native thinking with a rationale followed
 by `</think>` and the final JSON.
 
+Uploaded ablation bundles:
+
+- `stage2_ablation_vi_gemini.zip`: Gemini VI only, 50,637 train + 3,195 validation.
+- `stage2_ablation_reasoning_only.zip`: Content Safety Reasoning only, 35,467 train + 437 validation.
+
 Upstream V3 and reasoning data are attributed to NVIDIA under CC-BY-4.0.
 The Gemini Vietnamese files are derivative translations and retain upstream
 IDs/labels. Do not treat this archive as an evaluation benchmark. The
