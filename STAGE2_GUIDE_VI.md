@@ -84,10 +84,10 @@ Chỉ sau khi sáu bước trên pass:
 python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --skip-eval
 ```
 
-Recipe mặc định: fresh LoRA trên merged Stage 1, 5 epoch, LR `3e-6`, per-device batch 1, gradient accumulation 8, effective global batch 32 trên 4 GPU, max length 2048, LoRA r8/alpha32/dropout0.05, checkpoint mỗi 500 step. Nếu bị gián đoạn, giữ nguyên toàn bộ run directory rồi resume:
+Đây là baseline 1 epoch trên merged Stage 1. Các config 5 epoch dùng `save_strategy: epoch` và `eval_strategy: epoch` để có checkpoint/metric ở cuối từng epoch. Khi cần đánh giá mỗi epoch, bỏ `--skip-eval`; khi bị gián đoạn, giữ nguyên toàn bộ run directory rồi resume:
 
 ```bash
-python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --skip-eval --resume
+python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --resume
 ```
 
 Không dùng `--no-checkpoints` cho full train. Không tự động đánh giá hay xóa checkpoint từ script train.
