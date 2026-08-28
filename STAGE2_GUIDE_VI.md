@@ -112,9 +112,11 @@ và `stage2_ablation_reasoning_only.zip` đã nằm trong HF offline-zips.
 | Run | Data | Epoch | Config |
 |---|---|---:|---|
 | VI-1E | Gemini VI only | 1 | `stage2_train_qwen3_8b_vi_gemini_1epoch.yaml` |
-| VI-5E | Gemini VI only | 5 | `stage2_train_qwen3_8b_vi_gemini_5epoch.yaml` |
-| Reasoning-5E | Reasoning only, random THINK/NO-THINK | 5 | `stage2_train_qwen3_8b_reasoning_only_5epoch.yaml` |
-| Full-5E | V3 + VI + reasoning + N35 + WildGuard | 5 | `stage2_train_qwen3_8b_bundle.yaml` |
+| VI-5E | Gemini VI only | 5, lưu mỗi epoch | `stage2_train_qwen3_8b_vi_gemini_5epoch.yaml` |
+| Reasoning-1E | Reasoning only, random THINK/NO-THINK | 1 | `stage2_train_qwen3_8b_reasoning_only_1epoch.yaml` |
+| Reasoning-5E | Reasoning only, random THINK/NO-THINK, lưu mỗi epoch | 5 | `stage2_train_qwen3_8b_reasoning_only_5epoch.yaml` |
+| Full-1E | V3 + VI + reasoning + N35 + WildGuard | 1 | `stage2_train_qwen3_8b_bundle.yaml` |
+| Full-5E | Full data, lưu mỗi epoch | 5 | `stage2_train_qwen3_8b_bundle_5epoch_each_epoch.yaml` |
 
 Chỉ báo cáo hiệu quả sau khi đánh giá cùng một bộ benchmark, cùng decoding và
 tách rõ prompt-only/response-only; không so sánh loss giữa các run như metric

@@ -21,7 +21,7 @@ data:
   max_length: 2048
 
 training:
-  epochs: 5
+  epochs: 1
   learning_rate: 3.0e-06
   per_device_batch_size: 1
   gradient_accumulation_steps: 8
@@ -31,5 +31,7 @@ training:
   logging_steps: 10
   save_steps: 500
   eval_steps: 500
+  save_strategy: epoch
+  eval_strategy: epoch
   save_total_limit: 3
   seed: 3407

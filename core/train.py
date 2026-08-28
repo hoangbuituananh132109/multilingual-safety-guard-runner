@@ -262,6 +262,12 @@ def main() -> None:
     import inspect as _inspect
     from transformers import TrainingArguments as _TA
     _sig_params = set(_inspect.signature(_TA.__init__).parameters)
+    save_strategy = str(train_cfg.get("save_strategy", "steps"))
+    eval_strategy = str(train_cfg.get("eval_strategy", "steps"))
+    if save_strategy not in {"steps", "epoch"}:
+        raise ValueError("training.save_strategy must be 'steps' or 'epoch'")
+    if eval_strategy not in {"steps", "epoch", "no"}:
+        raise ValueError("training.eval_strategy must be 'steps', 'epoch' or 'no'")
     _ta_kwargs = dict(
         output_dir=str(output), run_name=cfg["run_name"], num_train_epochs=float(train_cfg["epochs"]), max_steps=args.max_steps,
         per_device_train_batch_size=int(train_cfg["per_device_batch_size"]), per_device_eval_batch_size=int(train_cfg["per_device_batch_size"]),
@@ -269,7 +275,7 @@ def main() -> None:
         lr_scheduler_type=train_cfg["lr_scheduler_type"], lr_scheduler_kwargs={"warmup_ratio": float(train_cfg["warmup_ratio"])}, bf16=True, tf32=True,
         gradient_checkpointing=bool(train_cfg["gradient_checkpointing"]), gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=int(train_cfg["logging_steps"]), save_steps=int(train_cfg["save_steps"]), eval_steps=int(train_cfg["eval_steps"]),
-        eval_strategy="no" if args.skip_eval else "steps", save_strategy="no" if args.no_checkpoints else "steps", save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
+        eval_strategy="no" if args.skip_eval else eval_strategy, save_strategy="no" if args.no_checkpoints else save_strategy, save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
         report_to=[], seed=int(train_cfg["seed"]), data_seed=int(train_cfg["seed"]), ddp_find_unused_parameters=False,
         remove_unused_columns=False, label_names=["labels"], save_safetensors=True,
     )
