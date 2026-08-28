@@ -6,7 +6,7 @@ Nhánh: `no-dataset`
 
 ## Kết luận
 
-Repository đúng là project Guard, không phải PIPPA. Sau khi thêm pipeline Phase 2, worktree sạch và `HEAD` khớp `origin/no-dataset` tại commit `ba3434c`.
+Repository đúng là project Guard, không phải PIPPA. Sau khi thêm pipeline Phase 2, worktree sạch và `HEAD` khớp `origin/no-dataset` tại commit `cada7d3`.
 
 Nhánh hiện tại đủ cho Stage 1: chuẩn bị Nemotron V3, SEA/XSafety, train LoRA/full, resume checkpoint, đánh giá Transformers/vLLM và merge LoRA cho vLLM. Tuy nhiên code cũ chưa thể thực hiện đúng kế hoạch Phase 2 vì chỉ có một prompt taxonomy-on, chỉ có target JSON no-think, chưa có semantic registry đa nguồn, chưa chọn một bộ dịch VI, chưa lọc Nemotron 3.5 và chưa audit leakage với benchmark test.
 

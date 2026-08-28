@@ -47,8 +47,8 @@ WildGuardTrain có 86.759 raw records; sau prompt-view dedupe còn 86.316 semant
 - Gemini: 160 ví dụ (80 train, 80 validation), 4 nguồn local, validate 0 lỗi.
 - Full Gemini + WildGuard: 372.559 rendered rows, validate 0 lỗi.
 - Luna/Sol: 160 ví dụ (80 train, 80 validation), 4 nguồn local, validate 0 lỗi.
-- Unit tests: 4/4 pass, gồm taxonomy-off, unknown category, THINK target và cross-split leakage detection.
-- Full build và full training chưa chạy.
+- Unit tests: 6/6 pass, gồm taxonomy-off, unknown category, native THINK target, dual taxonomy/thinking views và cross-split leakage detection.
+- Full build đã chạy và validate 0 lỗi; full training chưa chạy.
 
 ## Điều kiện còn thiếu
 
