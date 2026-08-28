@@ -32,5 +32,5 @@ training:
   eval_steps: 500
   save_strategy: epoch
   eval_strategy: epoch
-  save_total_limit: 3
+  save_total_limit: 5
   seed: 3407
