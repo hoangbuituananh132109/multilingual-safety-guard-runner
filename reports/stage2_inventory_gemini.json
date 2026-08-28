@@ -44,12 +44,21 @@
     "source:vi_gemini:split:validation": 3195,
     "source:vi_gemini:unknown_category:False": 53832,
     "source:vi_gemini:view:P": 33215,
-    "source:vi_gemini:view:PR": 20617
+    "source:vi_gemini:view:PR": 20617,
+    "source:wildguardtrain:duplicate_prompt_view": 37825,
+    "source:wildguardtrain:duplicate_semantic": 538,
+    "source:wildguardtrain:examples": 86316,
+    "source:wildguardtrain:label:safe": 52872,
+    "source:wildguardtrain:label:unsafe": 33444,
+    "source:wildguardtrain:split:train": 85036,
+    "source:wildguardtrain:split:validation": 1280,
+    "source:wildguardtrain:unknown_category:False": 86316,
+    "source:wildguardtrain:view:P": 48382,
+    "source:wildguardtrain:view:PR": 37934
   },
-  "unique_semantic_examples": 152908,
-  "unique_content_hashes": 147864,
+  "unique_semantic_examples": 239224,
+  "unique_content_hashes": 230784,
   "blockers": [
-    "missing source wildguard: D:\\Downloads\\Safety Dataset\\multilingual-safety-guard-runner\\input\\stage2\\wildguard\\wildguardtrain.jsonl",
     "missing benchmark test path for leakage audit: D:\\Downloads\\Safety Dataset\\multilingual-safety-guard-runner\\work\\benchmarks"
   ]
 }
