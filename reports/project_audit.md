@@ -6,7 +6,7 @@ Nhánh: `no-dataset`
 
 ## Kết luận
 
-Repository đúng là project Guard, không phải PIPPA. Trước khi thêm pipeline Phase 2, worktree sạch và `HEAD` khớp `origin/no-dataset` tại commit `934abdf12ec5001ec62ee6e7fe092fb5be14b156`.
+Repository đúng là project Guard, không phải PIPPA. Sau khi thêm pipeline Phase 2, worktree sạch và `HEAD` khớp `origin/no-dataset` tại commit `ba3434c`.
 
 Nhánh hiện tại đủ cho Stage 1: chuẩn bị Nemotron V3, SEA/XSafety, train LoRA/full, resume checkpoint, đánh giá Transformers/vLLM và merge LoRA cho vLLM. Tuy nhiên code cũ chưa thể thực hiện đúng kế hoạch Phase 2 vì chỉ có một prompt taxonomy-on, chỉ có target JSON no-think, chưa có semantic registry đa nguồn, chưa chọn một bộ dịch VI, chưa lọc Nemotron 3.5 và chưa audit leakage với benchmark test.
 
@@ -31,13 +31,12 @@ Nhánh hiện tại đủ cho Stage 1: chuẩn bị Nemotron V3, SEA/XSafety, tr
 | Nguồn | Revision | Trạng thái local |
 |---|---|---|
 | Nemotron Safety Guard Dataset V3 | `a3f7ecb3433d1933701a83f18de16c36934a7f51` | Có snapshot 9 ngôn ngữ |
-| WildGuardMix / `wildguardtrain` | `d29c47f41c8b51348b5c8e8c81c039b3132b66d1` | Chưa có; dataset gated |
+| WildGuardMix / `wildguardtrain` | `d29c47f41c8b51348b5c8e8c81c039b3132b66d1` | Có local; 86.759 raw records |
 | Nemotron Content Safety Reasoning | `792b0715f519c0750d63b73af2bf33ddd9ac3887` | Có file reasoning |
 | Nemotron 3.5 Content Safety | `841f5023b8db12b484180c6121bb10fcf400d1c3` | Có train parquet |
 
 ## Chặn full-ready
 
-1. Chưa có `input/stage2/wildguard/wildguardtrain.jsonl` sau khi người dùng được cấp quyền Hugging Face.
-2. Local chưa có `work/benchmarks`; vì vậy chưa thể hoàn thành leakage audit đối với toàn bộ benchmark test. Full build sẽ báo lỗi thay vì bỏ qua hai điều kiện này.
+1. Local chưa có `work/benchmarks`; vì vậy chưa thể hoàn thành leakage audit đối với toàn bộ benchmark test. Full build vẫn ghi rõ blocker thay vì bỏ qua điều kiện này.
 
 Không có full training nào được khởi chạy trong audit này.

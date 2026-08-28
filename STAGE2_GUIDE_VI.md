@@ -101,7 +101,7 @@ python3 scripts/unpack_stage2_bundle.py --zip stage2_bundle.zip --output-dir wor
 python3 stage2.py validate --data-dir work/stage2/full_gemini
 ```
 
-Sau khi WildGuard được cấp quyền, build lại không dùng `--exclude-source wildguard`; chỉ bundle/upload khi `training_ready=true`. Không đưa benchmark test vào archive hoặc HF dataset repo. Lệnh upload cần repo ID do chủ tài khoản chọn:
+Bundle có WildGuard hiện đã tạo local tại `D:\Downloads\Safety Dataset\company-transfer\stage2_gemini_v2_wildguard_training_ready.zip`. Bản no-WildGuard đã upload tại [HF offline-zips](https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips). Không đưa benchmark test vào archive hoặc HF dataset repo; bundle có WildGuard chỉ chia sẻ trong phạm vi đã được cấp phép.
 
 ```bash
 hf upload <ORG>/<DATASET_REPO> stage2_bundle.zip stage2_bundle.zip --repo-type dataset
