@@ -1,0 +1,36 @@
+run_name: qwen3-8b-stage2-gemini
+output_dir: runs-stage2/qwen3_8b/lora_phase2_gemini
+
+model:
+  # Must be the merged Stage-1 model, not its LoRA adapter directory.
+  id: ${MODEL_PATH_STAGE1_MERGED}
+  tokenizer_id: ${MODEL_PATH_STAGE1_MERGED}
+  revision: null
+  family: nemotron
+  tuning: lora
+  attention: sdpa
+  trust_remote_code: false
+  lora_r: 8
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, v_proj]
+
+data:
+  train: work/stage2/full_gemini/train.jsonl
+  validation: work/stage2/full_gemini/validation.jsonl
+  max_length: 2048
+
+training:
+  epochs: 1
+  learning_rate: 3.0e-06
+  # Company target: 4 x A30, effective global batch = 1 * 8 * 4 = 32.
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 8
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_steps: 500
+  eval_steps: 500
+  save_total_limit: 3
+  seed: 3407

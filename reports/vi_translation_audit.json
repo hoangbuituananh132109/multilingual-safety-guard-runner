@@ -1,0 +1,169 @@
+{
+  "luna_sol": {
+    "directory": "D:\\Downloads\\Safety Dataset\\data\\final_luna_sol_pure_v1",
+    "records": 45416,
+    "splits": {
+      "train": {
+        "path": "D:\\Downloads\\Safety Dataset\\data\\final_luna_sol_pure_v1\\nemotron_train_en_vi_v10_final.jsonl",
+        "sha256": "3c5d1ce29abdc2a5cc6834a3d099867d071009ceef5ed6aef817727b02ceff63",
+        "uid_set_sha256": "eef72cce5ec1f25b8957c72e37ea1942553c26af10439303f1c6bc154cf3c75f",
+        "source_contract_sha256": "b1a54ac66d35c7916e58b638b71f897b41240f5befa1e3e7cc574913437af937",
+        "records": 40007,
+        "prompt_label:unsafe": 23751,
+        "response_present:True": 19431,
+        "prompt_label:safe": 16256,
+        "response_present:False": 20576
+      },
+      "valid": {
+        "path": "D:\\Downloads\\Safety Dataset\\data\\final_luna_sol_pure_v1\\nemotron_valid_en_vi_v10_final.jsonl",
+        "sha256": "ec0a960b6dc8d6a30cfb8e560523089f8b6db7742fdfee23f105ae212876d19d",
+        "uid_set_sha256": "51c856865084b837f24e2cfcb45d6f0c36bc0b94235ed89e97add4781a78dd03",
+        "source_contract_sha256": "0a3209dc8b9681d65e05a089715aca5f338b89a33525362108b630eeea8ebe81",
+        "records": 2445,
+        "prompt_label:unsafe": 1472,
+        "response_present:True": 1187,
+        "prompt_label:safe": 973,
+        "response_present:False": 1258
+      },
+      "test": {
+        "path": "D:\\Downloads\\Safety Dataset\\data\\final_luna_sol_pure_v1\\nemotron_test_en_vi_v10_final.jsonl",
+        "sha256": "b0794062d74ff6ecc5d628276e8d9e489c19d9fb6c297671c6a9f704c499b53b",
+        "uid_set_sha256": "06f8ed97cefef2d56fe55ab1e123f41835e303a4783af33c577bfcab2232bb4a",
+        "source_contract_sha256": "2da2b90a1bc78fc59790e1b836ff5f32d0931ac7591a7a6fb6dd7dbc75993b3e",
+        "records": 2964,
+        "prompt_label:unsafe": 1658,
+        "response_present:True": 1313,
+        "prompt_label:safe": 1306,
+        "response_present:False": 1651
+      }
+    },
+    "providers": {
+      "luna_initial": 43014,
+      "luna_remaining": 2033,
+      "sol_web": 331,
+      "luna_recovered": 7,
+      "sol_web_missing25": 25,
+      "luna_continuation": 6
+    },
+    "models": {
+      "gpt-5.6-luna": 45060,
+      "gpt-5.6-sol-web": 356
+    },
+    "dispositions": {
+      "hard_pass": 45004,
+      "warning_pass": 372,
+      "manual_audit_pass": 31,
+      "accepted_known_issue": 2,
+      "revalidated_pass": 7
+    },
+    "split_uid_overlap": {
+      "train_valid": 0,
+      "train_test": 0,
+      "valid_test": 0
+    },
+    "hard_error_count": 0,
+    "hard_errors": [],
+    "warning_count": 2,
+    "warnings": [
+      "train:en-train-00017624-16f95a78eb77: blank source prompt; row is non-renderable and will be skipped",
+      "valid:en-valid-00000596-6528619f1dd6: blank source prompt; row is non-renderable and will be skipped"
+    ],
+    "ready": true
+  },
+  "gemini": {
+    "directory": "D:\\Downloads\\Safety Dataset\\data\\final",
+    "records": 45416,
+    "splits": {
+      "train": {
+        "path": "D:\\Downloads\\Safety Dataset\\data\\final\\nemotron_train_en_vi_v10_final.jsonl",
+        "sha256": "d841fb7d4f7be21a135a51979b012ce5cd47a3f8ebca37efb9dd572f2cafa963",
+        "uid_set_sha256": "eef72cce5ec1f25b8957c72e37ea1942553c26af10439303f1c6bc154cf3c75f",
+        "source_contract_sha256": "b1a54ac66d35c7916e58b638b71f897b41240f5befa1e3e7cc574913437af937",
+        "records": 40007,
+        "prompt_label:unsafe": 23751,
+        "response_present:True": 19431,
+        "prompt_label:safe": 16256,
+        "response_present:False": 20576
+      },
+      "valid": {
+        "path": "D:\\Downloads\\Safety Dataset\\data\\final\\nemotron_valid_en_vi_v10_final.jsonl",
+        "sha256": "e501eff84e2a8e2c537f41a47df681ca8fa66eab5b619b32b13755470deda123",
+        "uid_set_sha256": "51c856865084b837f24e2cfcb45d6f0c36bc0b94235ed89e97add4781a78dd03",
+        "source_contract_sha256": "0a3209dc8b9681d65e05a089715aca5f338b89a33525362108b630eeea8ebe81",
+        "records": 2445,
+        "prompt_label:unsafe": 1472,
+        "response_present:True": 1187,
+        "prompt_label:safe": 973,
+        "response_present:False": 1258
+      },
+      "test": {
+        "path": "D:\\Downloads\\Safety Dataset\\data\\final\\nemotron_test_en_vi_v10_final.jsonl",
+        "sha256": "6892a2beb8760e78ac77589b548221117269099bb77859d98bcf0435314cb1b1",
+        "uid_set_sha256": "06f8ed97cefef2d56fe55ab1e123f41835e303a4783af33c577bfcab2232bb4a",
+        "source_contract_sha256": "2da2b90a1bc78fc59790e1b836ff5f32d0931ac7591a7a6fb6dd7dbc75993b3e",
+        "records": 2964,
+        "prompt_label:unsafe": 1658,
+        "response_present:True": 1313,
+        "prompt_label:safe": 1306,
+        "response_present:False": 1651
+      }
+    },
+    "providers": {
+      "gemini": 44814,
+      "codex_human_review": 174,
+      "manual_web_review": 348,
+      "gemini_revision": 29,
+      "manual_terra_revision": 51
+    },
+    "models": {
+      "gemini-3.1-flash-lite": 44843,
+      "codex-final-quality-review": 60,
+      "ChatGPT manual review": 113,
+      "codex-final-profanity-manual-review": 64,
+      "Gemini VIP / ChatGPT manual review": 235,
+      "codex-luna-manual-review": 12,
+      "codex-terra-manual-review": 38,
+      "gpt-5.6-terra": 51
+    },
+    "dispositions": {
+      "ready": 45373,
+      "ready_with_metadata": 43
+    },
+    "split_uid_overlap": {
+      "train_valid": 0,
+      "train_test": 0,
+      "valid_test": 0
+    },
+    "hard_error_count": 0,
+    "hard_errors": [],
+    "warning_count": 2,
+    "warnings": [
+      "train:en-train-00017624-16f95a78eb77: blank source prompt; row is non-renderable and will be skipped",
+      "valid:en-valid-00000596-6528619f1dd6: blank source prompt; row is non-renderable and will be skipped"
+    ],
+    "ready": true
+  },
+  "comparison": {
+    "same_record_count": true,
+    "splits": {
+      "train": {
+        "left_records": 40007,
+        "right_records": 40007,
+        "same_uid_set": true,
+        "same_source_contract": true
+      },
+      "valid": {
+        "left_records": 2445,
+        "right_records": 2445,
+        "same_uid_set": true,
+        "same_source_contract": true
+      },
+      "test": {
+        "left_records": 2964,
+        "right_records": 2964,
+        "same_uid_set": true,
+        "same_source_contract": true
+      }
+    }
+  }
+}

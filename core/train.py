@@ -24,9 +24,9 @@ from transformers import (
 )
 
 try:
-    from .prompt import N23, render_prompt
+    from .prompt import N23, render_instruction, render_prompt
 except ImportError:
-    from prompt import N23, render_prompt
+    from prompt import N23, render_instruction, render_prompt
 
 
 def log(message: str) -> None:
@@ -122,6 +122,8 @@ def sync_resume_intervals(output: Path, resume_arg: str | None, train_cfg: dict[
 
 
 def target_text(row: dict[str, Any], family: str) -> str:
+    if row.get("target") is not None:
+        return str(row["target"])
     label = str(row["safety_label"])
     if family == "qwen_binary":
         return "Safety: " + ("Unsafe" if label == "unsafe" else "Safe")
@@ -149,6 +151,17 @@ def main() -> None:
     configure_vram_limit(distributed_state, args.vram_fraction)
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     model_cfg, data_cfg, train_cfg = cfg["model"], cfg["data"], cfg["training"]
+    model_cfg["id"] = os.path.expandvars(str(model_cfg["id"]))
+    if model_cfg.get("tokenizer_id"):
+        model_cfg["tokenizer_id"] = os.path.expandvars(str(model_cfg["tokenizer_id"]))
+    data_cfg["train"] = os.path.expandvars(str(data_cfg["train"]))
+    data_cfg["validation"] = os.path.expandvars(str(data_cfg["validation"]))
+    cfg["output_dir"] = os.path.expandvars(str(cfg["output_dir"]))
+    if "$" in model_cfg["id"] or "%" in model_cfg["id"]:
+        raise EnvironmentError(
+            f"Unresolved environment variable in model.id={model_cfg['id']!r}; "
+            "set MODEL_PATH_STAGE1_MERGED before loading a Stage-2 config"
+        )
     log(f"config loaded from {args.config}")
     log(f"model_id={model_cfg['id']} tuning={model_cfg['tuning']} family={model_cfg['family']} attention={model_cfg.get('attention', 'sdpa')}")
     log(f"train={data_cfg['train']} validation={data_cfg['validation']} max_length={data_cfg['max_length']}")
@@ -201,7 +214,20 @@ def main() -> None:
     max_length = int(data_cfg["max_length"])
 
     def tokenize(row: dict[str, Any]) -> dict[str, Any]:
-        prompt = render_prompt(tokenizer, model_cfg["family"], str(row["prompt"]), row.get("response"))
+        if row.get("instruction") is not None:
+            enable_thinking = str(row.get("thinking_mode") or "no_think") == "think"
+            prompt = render_instruction(
+                tokenizer,
+                str(row["instruction"]),
+                enable_thinking=enable_thinking,
+            )
+            if enable_thinking and "<think>" not in prompt[-128:]:
+                raise ValueError(
+                    "Stage-2 THINK rows require a tokenizer with Qwen native "
+                    "enable_thinking support and a prefilled <think> prefix"
+                )
+        else:
+            prompt = render_prompt(tokenizer, model_cfg["family"], str(row["prompt"]), row.get("response"))
         target = target_text(row, model_cfg["family"])
         target_ids = tokenizer.encode(target, add_special_tokens=False) + [tokenizer.eos_token_id]
         prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
