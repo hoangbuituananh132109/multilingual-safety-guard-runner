@@ -11,7 +11,7 @@ from typing import Any
 import torch
 import yaml
 from accelerate.state import PartialState
-from datasets import load_dataset
+from datasets import Dataset, DatasetDict
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
@@ -34,6 +34,30 @@ def log(message: str) -> None:
         return
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[train] {stamp} {message}", flush=True)
+
+
+def load_training_json(path: str) -> Dataset:
+    """Load only the stable training columns from rendered JSONL.
+
+    Rendered rows intentionally contain nullable/mixed metadata fields.  The
+    generic HF JSON builder can infer a field as Arrow ``null`` from an early
+    chunk and then fail when a later row contains a string/object.  Training
+    needs only these scalar columns, so normalize them before constructing the
+    Arrow dataset.
+    """
+    required = ("instruction", "target", "view", "thinking_mode")
+    rows: list[dict[str, str]] = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise ValueError(f"Expected JSON object at {path}:{line_number}")
+            rows.append({key: str(value.get(key) or "") for key in required})
+    if not rows:
+        raise ValueError(f"Training JSONL is empty: {path}")
+    return Dataset.from_list(rows)
 
 
 def vram_mb() -> str:
@@ -203,7 +227,10 @@ def main() -> None:
 
     log("loading dataset...")
     with distributed_state.local_main_process_first():
-        raw = load_dataset("json", data_files={"train": data_cfg["train"], "validation": data_cfg["validation"]})
+        raw = DatasetDict({
+            "train": load_training_json(data_cfg["train"]),
+            "validation": load_training_json(data_cfg["validation"]),
+        })
     log(f"dataset loaded: train={len(raw['train'])} validation={len(raw['validation'])}")
     effective_batch = int(train_cfg["per_device_batch_size"]) * int(train_cfg["gradient_accumulation_steps"]) * distributed_state.num_processes
     update_steps = (len(raw["train"]) + effective_batch - 1) // effective_batch
@@ -222,10 +249,11 @@ def main() -> None:
                 enable_thinking=enable_thinking,
             )
             if enable_thinking and "<think>" not in prompt[-128:]:
-                raise ValueError(
-                    "Stage-2 THINK rows require a tokenizer with Qwen native "
-                    "enable_thinking support and a prefilled <think> prefix"
-                )
+                # Some merged Qwen3 exports retain a Qwen2Tokenizer/chat
+                # template that accepts no native enable_thinking flag. Keep
+                # the same completion contract by explicitly pre-filling the
+                # native marker rather than rejecting the whole reasoning set.
+                prompt = prompt.rstrip() + "\n<think>\n"
         else:
             prompt = render_prompt(tokenizer, model_cfg["family"], str(row["prompt"]), row.get("response"))
         target = target_text(row, model_cfg["family"])
