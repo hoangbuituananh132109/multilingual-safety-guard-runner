@@ -43,29 +43,37 @@ class Stage2DataTests(unittest.TestCase):
             response=None,
             prompt_label="safe",
             response_label=None,
-            categories=[],
+            categories=[N23[0]],
             reasoning="<think>short rationale</think>\nPrompt harm: unharmful",
         )
         value = render(row, 3407, taxonomy_mode="on", thinking_mode="think")
         self.assertTrue(value["target"].startswith("short rationale\n</think>\n\n{"))
         self.assertFalse(value["target"].startswith("<think>"))
 
-    def test_v3_renders_taxonomy_dual_without_changing_semantic_id(self) -> None:
+    def test_v3_renders_one_stable_taxonomy_view(self) -> None:
         row = Normalized("nemotron_v3_replay", "id", "train", "en", "p", None, "safe", None, [])
         values = render_views(row, 3407)
-        self.assertEqual({value["taxonomy_mode"] for value in values}, {"on", "off"})
+        self.assertEqual(len(values), 1)
+        self.assertIn(values[0]["taxonomy_mode"], {"on", "off"})
         self.assertEqual({value["thinking_mode"] for value in values}, {"no_think"})
         self.assertEqual(len({value["semantic_id"] for value in values}), 1)
-        self.assertEqual(len({value["example_id"] for value in values}), 2)
+        self.assertEqual(len({value["example_id"] for value in values}), 1)
 
-    def test_reasoning_renders_native_think_and_no_think_pair(self) -> None:
-        row = Normalized(
-            "nemotron_reasoning_28k", "id", "train", "en", "p", None,
-            "safe", None, [], "<think>because it is benign</think>",
-        )
-        values = render_views(row, 3407)
-        self.assertEqual({value["thinking_mode"] for value in values}, {"think", "no_think"})
-        self.assertEqual(len({value["taxonomy_mode"] for value in values}), 1)
+    def test_reasoning_uses_one_stable_native_mode(self) -> None:
+        modes = set()
+        for index in range(128):
+            row = Normalized(
+                "nemotron_reasoning_28k", f"id-{index}", "train", "en", "p", None,
+                "safe", None, [N23[0]], "<think>because it is benign</think>",
+            )
+            values = render_views(row, 3407)
+            self.assertEqual(len(values), 1)
+            modes.add(values[0]["thinking_mode"])
+        self.assertEqual(modes, {"think", "no_think"})
+
+    def test_no_category_forces_taxonomy_off(self) -> None:
+        row = Normalized("n35", "none", "train", "en", "p", None, "safe", None, [])
+        self.assertEqual(render(row, 3407)["taxonomy_mode"], "off")
 
     def test_validator_detects_cross_split_semantic_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -4,22 +4,29 @@ Ngày inventory: 2026-08-28
 Nguồn VI được chọn cho run đầu: Gemini  
 Seed cố định: 3407
 
+Policy hiện hành: mỗi semantic record chỉ render một view; V3/VI chọn
+taxonomy ON 75% và OFF 25% bằng hash ổn định (nhưng không thể ON nếu không có
+category N23); Reasoning chọn THINK/NO-THINK 50/50 nếu có trace; WildGuard
+luôn OFF; N35 ON khi có category N23, S24-only/không có category là OFF.
+
 ## Inventory hiện có
 
 Các số dưới đây là số ví dụ `P/PR` sau semantic registry và prompt-view dedupe, chưa render full instruction để tránh tạo artifact lớn trên máy local.
 
 | Nguồn | Train | Validation | P | PR | Tổng |
 |---|---:|---:|---:|---:|---:|
-| V3 semantic replay, một language/upstream ID | 50.271 | 3.189 | 34.634 | 18.826 | 53.460 |
+| V3 semantic replay, một language/upstream ID | 53.053 | 3.356 | 36.445 | 19.964 | 56.409 |
 | Gemini VI full (test bị loại) | 50.637 | 3.195 | 33.215 | 20.617 | 53.832 |
 | Content Safety Reasoning | 35.467 | 437 | 23.110 | 12.794 | 35.904 |
-| Nemotron 3.5 selected | 9.605 | 107 | 5.856 | 3.856 | 9.712 |
+| Nemotron 3.5 selected | 9.559 | 99 | 5.829 | 3.829 | 9.658 |
 | WildGuardTrain | 85.036 | 1.280 | 48.382 | 37.934 | 86.316 |
-| **Tổng semantic registry** | **231.016** | **8.208** | **226.325** | **146.234** | **239.224** |
+| **Tổng semantic registry** | **233.752** | **8.367** | **146.981** | **95.138** | **242.119** |
 
 Nguồn reasoning local có chính xác 27.459 record trong file efficient-reasoning. Semantic registry giữ các interaction khác nhau dù upstream ID trùng, rồi dedupe prompt view. Con số “28k” trong kế hoạch/tài liệu là tên quy mô làm tròn, không được thay cho count local.
 
-Nemotron 3.5 bắt đầu từ train parquet 88.688 record, sau đó chỉ giữ safety + text-only + synthetic/adversarial, loại topic-following, multimodal, duplicate và overlap nội bộ với các nguồn đã chọn. Kết quả còn 5.856 semantic record, render thành 9.712 P/PR. Có 46 ví dụ mang category ngoài N23 là `Economic Harm`; các ví dụ này bị ép taxonomy-off, không gán sai vào N23.
+Full render mới: 233.752 train + 8.367 validation = 242.119 rows; taxonomy ON 49.854, OFF 192.265; THINK 12.965, NO-THINK 229.154. ON thấp hơn 75% toàn cục vì V3/VI prompt-only views không mang category và WildGuard luôn OFF; 75/25 chỉ áp dụng cho các record có taxonomy N23 hợp lệ.
+
+Nemotron 3.5 bắt đầu từ train parquet 88.688 record, sau đó chỉ giữ safety + text-only + synthetic/adversarial, loại topic-following, multimodal, duplicate và overlap với các nguồn đã chọn. Inventory độc lập là 9.712 P/PR; full build sau loại overlap còn 9.658 (5.829 P + 3.829 PR). Có 46 ví dụ mang category ngoài N23 là `Economic Harm`; các ví dụ này bị ép taxonomy-off, không gán sai vào N23.
 
 WildGuardTrain có 86.759 raw records; sau prompt-view dedupe còn 86.316 semantic P/PR. WildGuard luôn taxonomy-off và giữ metadata `response_refusal_label`, `adversarial`, `subcategory`, không fabricate N23.
 
@@ -34,20 +41,22 @@ WildGuardTrain có 86.759 raw records; sau prompt-view dedupe còn 86.316 semant
 
 ## Quy tắc render
 
-- V3: một ngôn ngữ được chọn ổn định theo hash của upstream ID; cùng ID luôn chọn cùng ngôn ngữ.
+- V3: một ngôn ngữ được chọn ổn định theo hash của upstream ID trong số các ngôn ngữ thực sự có ID đó; cùng ID luôn chọn cùng ngôn ngữ.
 - VI: chỉ đúng một nguồn dịch trong mỗi build; test split không bao giờ được nạp.
 - WildGuard: taxonomy-off bắt buộc.
-- N23-only: taxonomy ON/OFF được chia ổn định theo seed.
+- V3/Gemini VI: taxonomy ON/OFF 75/25 theo semantic ID; không nhân đôi view.
+- N23-only reasoning: taxonomy ON; THINK/NO-THINK 50/50 theo semantic ID, không tạo cặp.
+- N35: ON khi có N23 hợp lệ; S24-only/không có category và category ngoài N23-only là OFF.
 - Category ngoài N23: taxonomy-off bắt buộc.
-- Reasoning: THINK/NO-THINK được chia ổn định; NO-THINK vẫn là đường đánh giá mặc định.
+- Reasoning: native Qwen THINK target bắt đầu bằng rationale và đóng `</think>`; NO-THINK không chứa think tags.
 - Toàn bộ nguồn được trộn bằng hash ổn định, không train tuần tự theo nguồn.
 
 ## Smoke test đã chạy
 
 - Gemini: 160 ví dụ (80 train, 80 validation), 4 nguồn local, validate 0 lỗi.
-- Full Gemini + WildGuard: 372.559 rendered rows, validate 0 lỗi.
+- Full Gemini + WildGuard: 242.119 rendered rows, validate 0 lỗi.
 - Luna/Sol: 160 ví dụ (80 train, 80 validation), 4 nguồn local, validate 0 lỗi.
-- Unit tests: 6/6 pass, gồm taxonomy-off, unknown category, native THINK target, dual taxonomy/thinking views và cross-split leakage detection.
+- Unit tests: 7/7 pass, gồm taxonomy-off, unknown category, native THINK target, random non-paired dual thinking, stable taxonomy view và cross-split leakage detection.
 - Full build đã chạy và validate 0 lỗi; full training chưa chạy.
 
 ## Điều kiện còn thiếu

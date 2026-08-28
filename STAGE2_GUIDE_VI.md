@@ -84,7 +84,7 @@ Chỉ sau khi sáu bước trên pass:
 python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --skip-eval
 ```
 
-Recipe mặc định: fresh LoRA trên merged Stage 1, 1 epoch, LR `3e-6`, per-device batch 1, gradient accumulation 8, effective global batch 32 trên 4 GPU, max length 2048, LoRA r8/alpha32/dropout0.05, checkpoint mỗi 500 step. Nếu bị gián đoạn, giữ nguyên toàn bộ run directory rồi resume:
+Recipe mặc định: fresh LoRA trên merged Stage 1, 5 epoch, LR `3e-6`, per-device batch 1, gradient accumulation 8, effective global batch 32 trên 4 GPU, max length 2048, LoRA r8/alpha32/dropout0.05, checkpoint mỗi 500 step. Nếu bị gián đoạn, giữ nguyên toàn bộ run directory rồi resume:
 
 ```bash
 python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --skip-eval --resume
@@ -97,11 +97,11 @@ Không dùng `--no-checkpoints` cho full train. Không tự động đánh giá 
 Bundle training-only có thể giải nén và kiểm SHA-256 bằng một lệnh:
 
 ```bash
-python3 scripts/unpack_stage2_bundle.py --zip stage2_bundle.zip --output-dir work/stage2/full_gemini
-python3 stage2.py validate --data-dir work/stage2/full_gemini
+python3 scripts/unpack_stage2_bundle.py --zip stage2_bundle.zip --output-dir work/stage2/full_gemini_bundle
+python3 stage2.py validate --data-dir work/stage2/full_gemini_bundle/data
 ```
 
-Bundle có WildGuard hiện đã tạo local tại `D:\Downloads\Safety Dataset\company-transfer\stage2_gemini_v2_wildguard_training_ready.zip`. Bản no-WildGuard đã upload tại [HF offline-zips](https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips). Không đưa benchmark test vào archive hoặc HF dataset repo; bundle có WildGuard chỉ chia sẻ trong phạm vi đã được cấp phép.
+Bundle policy mới có WildGuard hiện đã tạo local tại `D:\Downloads\Safety Dataset\multilingual-safety-guard-runner\company-transfer\stage2_gemini_policy_training_ready.zip` và upload tại [HF offline-zips](https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips). Sau khi giải nén, dùng `stage2_train_qwen3_8b_bundle.yaml`; không đưa benchmark test vào archive hoặc HF dataset repo; bundle có WildGuard chỉ chia sẻ trong phạm vi đã được cấp phép.
 
 ```bash
 hf upload <ORG>/<DATASET_REPO> stage2_bundle.zip stage2_bundle.zip --repo-type dataset

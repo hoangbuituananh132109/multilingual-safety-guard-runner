@@ -150,11 +150,16 @@ def assigned_split(source: str, source_id: str, validation_fraction: float) -> s
 
 
 def taxonomy_on_allowed(row: Normalized) -> bool:
-    """Return whether an N23 prompt can represent this row without inventing labels."""
+    """Return whether this row has a usable N23 taxonomy label.
+
+    Rows with no N23 category (including S24-only/unknown-only rows) must stay
+    taxonomy-off. Mixed rows may remain ON, but only their N23 labels are
+    emitted in the target.
+    """
     known = [value for value in row.categories if value in N23]
     unknown = [value for value in row.categories if value not in N23]
     verdict = row.response_label if row.response is not None else row.prompt_label
-    return not row.force_taxonomy_off and not (verdict == "unsafe" and unknown and not known)
+    return bool(known) and not row.force_taxonomy_off and not (verdict == "unsafe" and unknown and not known)
 
 
 def render(
@@ -215,19 +220,29 @@ def render(
 
 
 def render_views(row: Normalized, seed: int) -> list[dict[str, Any]]:
-    """Render deterministic dual views while keeping one semantic registry row."""
+    """Render one deterministic view per semantic record.
+
+    Taxonomy ON/OFF is sampled by semantic ID (75/25 for V3 and VI).  The
+    reasoning source uses NVIDIA's dual-mode convention: one stable 50/50
+    THINK/NO-THINK assignment, never a paired duplicate.
+    """
     if row.source == "wildguardtrain":
         taxonomy_modes = ["off"]
         thinking_modes = ["no_think"]
     elif row.source in {"nemotron_v3_replay"} or row.source.startswith("vi_"):
-        taxonomy_modes = ["on", "off"] if taxonomy_on_allowed(row) else ["off"]
+        bucket = int(stable_hash(f"taxonomy:{seed}:{row.semantic_id}")[:8], 16) / float(16**8)
+        taxonomy_modes = ["on" if bucket < 0.75 and taxonomy_on_allowed(row) else "off"]
         thinking_modes = ["no_think"]
-    elif row.source in {"nemotron_reasoning_28k", "nemotron35_selected"}:
-        # THINK and NO-THINK are exact semantic pairs. Taxonomy is balanced
-        # across the corpus (rather than multiplying every row into four).
-        preferred = "on" if int(stable_hash(f"taxonomy:{seed}:{row.semantic_id}")[:2], 16) % 2 == 0 else "off"
-        taxonomy_modes = [preferred] if preferred == "off" or taxonomy_on_allowed(row) else ["off"]
-        thinking_modes = ["think", "no_think"] if row.reasoning else ["no_think"]
+    elif row.source == "nemotron_reasoning_28k":
+        taxonomy_modes = ["on" if taxonomy_on_allowed(row) else "off"]
+        if row.reasoning:
+            bucket = int(stable_hash(f"thinking:{seed}:{row.semantic_id}")[:8], 16) / float(16**8)
+            thinking_modes = ["think" if bucket < 0.5 else "no_think"]
+        else:
+            thinking_modes = ["no_think"]
+    elif row.source == "nemotron35_selected":
+        taxonomy_modes = ["on" if taxonomy_on_allowed(row) else "off"]
+        thinking_modes = ["no_think"]
     else:
         taxonomy_modes = ["on"] if taxonomy_on_allowed(row) else ["off"]
         thinking_modes = ["no_think"]
@@ -261,15 +276,18 @@ def vi_records(directory: Path, source_name: str) -> Iterator[Normalized]:
 
 def v3_records(root: Path, languages: list[str], seed: int) -> Iterator[Normalized]:
     for split, filename in (("train", "train.jsonl"), ("validation", "valid.jsonl")):
+        grouped: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
         for language in languages:
             path = root / language / filename
             if not path.is_file():
                 raise FileNotFoundError(path)
             for raw in read_jsonl(path):
                 upstream_id = str(raw.get("id") or f"{language}-{raw['_line']}")
-                chosen = languages[int(stable_hash(f"v3-language:{seed}:{upstream_id}")[:12], 16) % len(languages)]
-                if language != chosen:
-                    continue
+                grouped[upstream_id][language].append(raw)
+        for upstream_id in sorted(grouped):
+            available = sorted(grouped[upstream_id])
+            chosen = available[int(stable_hash(f"v3-language:{seed}:{upstream_id}")[:12], 16) % len(available)]
+            for raw in grouped[upstream_id][chosen]:
                 prompt = str(raw.get("prompt") or "").strip()
                 response = raw.get("response")
                 response = str(response).strip() if response is not None else None
