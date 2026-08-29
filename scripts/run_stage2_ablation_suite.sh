@@ -13,10 +13,11 @@ run_experiment() {
   local config="$2"
   local output_dir="$3"
   local result_file="${output_dir}/train_results.json"
+  local complete_file="${output_dir}/run_complete.json"
   local resume_args=()
 
-  if [[ -f "$result_file" ]]; then
-    echo "[$(date -Is)] SKIP ${name}: completed (${result_file})"
+  if [[ -f "$complete_file" ]] || { [[ -f "$result_file" ]] && { [[ -f "${output_dir}/final/adapter_config.json" ]] || [[ -f "${output_dir}/final/config.json" ]]; }; }; then
+    echo "[$(date -Is)] SKIP ${name}: completed (${output_dir}/final)"
     return 0
   fi
   if compgen -G "${output_dir}/checkpoint-*" > /dev/null; then

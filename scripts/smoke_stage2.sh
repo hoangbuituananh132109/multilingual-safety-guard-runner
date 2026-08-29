@@ -13,7 +13,8 @@ run_smoke() {
   local config="$2"
   echo "=== smoke: ${name} (${config}) ==="
   python3 -m torch.distributed.run --standalone --nproc-per-node=4 \
-    core/train.py --config "$config" --max-steps 3 --skip-eval --no-checkpoints --no-final-save \
+    core/train.py --config "$config" --output-dir "runs-stage2/_smoke/${name}" \
+    --max-steps 3 --skip-eval --no-checkpoints --no-final-save \
     2>&1 | tee "logs/smoke_${name}.log"
 }
 

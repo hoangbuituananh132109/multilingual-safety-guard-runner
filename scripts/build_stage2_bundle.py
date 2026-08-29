@@ -3,9 +3,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import zipfile
 from hashlib import sha256
 from pathlib import Path
+
+try:
+    from core.stage2_data import validate_dataset
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from core.stage2_data import validate_dataset
 
 
 def digest(path: Path) -> str:
@@ -34,6 +41,12 @@ def main() -> None:
             f"Refusing to bundle a dataset without {readiness_key}=true. Inspect manifest blockers "
             "or pass --allow-incomplete for a disposable smoke transfer."
         )
+    validation = validate_dataset(data_dir)
+    if not validation["valid"] and not args.allow_incomplete:
+        raise SystemExit(
+            f"Refusing to bundle a dataset that fails validation with {validation['error_count']} errors. "
+            "Run `python3 stage2.py validate --data-dir ...` for details."
+        )
     files = [data_dir / "train.jsonl", data_dir / "validation.jsonl", manifest_path]
     missing = [str(path) for path in files if not path.is_file()]
     if missing:
@@ -46,6 +59,7 @@ def main() -> None:
         "files": {path.name: {"sha256": digest(path), "bytes": path.stat().st_size} for path in files},
         "contains_model_weights": False,
         "contains_benchmark_tests": False,
+        "validation": {"valid": validation["valid"], "error_count": validation["error_count"]},
         "note": "Training-only rendered data. WildGuard and benchmark test data are not embedded unless present in the source manifest.",
     }
     readme = (

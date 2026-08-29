@@ -14,21 +14,25 @@ tags:
 # Stage-2 rendered safety training bundle
 
 This repository contains ZIP archives of rendered training data for the
-`multilingual-safety-guard-runner` Phase-2 experiment. The current policy-correct
-archive is `stage2_gemini_policy_training_ready.zip`.
+`multilingual-safety-guard-runner` Phase-2 experiment.
 
-The policy-correct archive contains 233,752 train and 8,367 validation rows
+**Deprecated after the 2026-08-29 audit:**
+`stage2_gemini_policy_training_ready.zip` and its two ablation archives use the
+schema-v2 rendering policy. They are retained only to reproduce the already
+launched exploratory run. Do not use them for a new training run or causal
+comparison. A replacement bundle has not been published yet.
+
+The deprecated archive contains 233,752 train and 8,367 validation rows
 (242,119 rendered rows total), using V3 semantic replay, Gemini Vietnamese
 translation, Nemotron Content Safety Reasoning, text-only synthetic Nemotron
 3.5, and WildGuardTrain. It contains no model weights, benchmark test data, or
 images. The manifest reports `training_ready=true` and `full_ready=false`
 because benchmark leakage inputs are not embedded.
 
-Each semantic record is rendered once. V3/Gemini use deterministic 75/25
-taxonomy ON/OFF where an N23 category exists; reasoning uses deterministic
-50/50 THINK/NO-THINK assignment, not paired duplication; WildGuard is always
-taxonomy-OFF. THINK targets use Qwen native thinking with a rationale followed
-by `</think>` and the final JSON.
+Known schema-v2 issues include taxonomy mode being confounded with safe/unsafe
+labels, discarded prompt-only category annotations, incorrect V3 language
+metadata, exact-content overlap across train/validation, conflicting labels
+between sources, and smoke artifacts being able to mimic a completed run.
 
 Uploaded ablation bundles:
 

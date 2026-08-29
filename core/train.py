@@ -163,9 +163,10 @@ def target_text(row: dict[str, Any], family: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, help="Override config output_dir (useful for isolated smoke runs)")
     parser.add_argument("--resume", nargs="?", const="auto")
     parser.add_argument("--max-steps", type=int, default=-1)
-    parser.add_argument("--skip-eval", action="store_true", help="Do not run eval during training (default: skip eval to avoid hanging on large valid set)")
+    parser.add_argument("--skip-eval", action="store_true", help="Do not run eval during training")
     parser.add_argument("--no-checkpoints", action="store_true", help="Only save the final model; skip periodic checkpoints to save disk/I/O")
     parser.add_argument("--no-final-save", action="store_true", help="Skip the final model export; intended only for disposable capacity probes")
     parser.add_argument("--vram-fraction", type=float, help="Cap the PyTorch allocator to a fraction of each visible GPU")
@@ -180,7 +181,7 @@ def main() -> None:
         model_cfg["tokenizer_id"] = os.path.expandvars(str(model_cfg["tokenizer_id"]))
     data_cfg["train"] = os.path.expandvars(str(data_cfg["train"]))
     data_cfg["validation"] = os.path.expandvars(str(data_cfg["validation"]))
-    cfg["output_dir"] = os.path.expandvars(str(cfg["output_dir"]))
+    cfg["output_dir"] = os.path.expandvars(str(args.output_dir if args.output_dir is not None else cfg["output_dir"]))
     if "$" in model_cfg["id"] or "%" in model_cfg["id"]:
         raise EnvironmentError(
             f"Unresolved environment variable in model.id={model_cfg['id']!r}; "
@@ -258,6 +259,10 @@ def main() -> None:
             prompt = render_prompt(tokenizer, model_cfg["family"], str(row["prompt"]), row.get("response"))
         target = target_text(row, model_cfg["family"])
         target_ids = tokenizer.encode(target, add_special_tokens=False) + [tokenizer.eos_token_id]
+        if len(target_ids) >= max_length:
+            raise ValueError(
+                f"Supervised target has {len(target_ids)} tokens, which does not fit max_length={max_length}"
+            )
         prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
         budget = max_length - len(target_ids)
         if len(prompt_ids) > budget:
@@ -300,7 +305,7 @@ def main() -> None:
         output_dir=str(output), run_name=cfg["run_name"], num_train_epochs=float(train_cfg["epochs"]), max_steps=args.max_steps,
         per_device_train_batch_size=int(train_cfg["per_device_batch_size"]), per_device_eval_batch_size=int(train_cfg["per_device_batch_size"]),
         gradient_accumulation_steps=int(train_cfg["gradient_accumulation_steps"]), learning_rate=float(train_cfg["learning_rate"]),
-        lr_scheduler_type=train_cfg["lr_scheduler_type"], lr_scheduler_kwargs={"warmup_ratio": float(train_cfg["warmup_ratio"])}, bf16=True, tf32=True,
+        lr_scheduler_type=train_cfg["lr_scheduler_type"], warmup_ratio=float(train_cfg["warmup_ratio"]), bf16=True, tf32=True,
         gradient_checkpointing=bool(train_cfg["gradient_checkpointing"]), gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=int(train_cfg["logging_steps"]), save_steps=int(train_cfg["save_steps"]), eval_steps=int(train_cfg["eval_steps"]),
         eval_strategy="no" if args.skip_eval else eval_strategy, save_strategy="no" if args.no_checkpoints else save_strategy, save_total_limit=int(train_cfg["save_total_limit"]), load_best_model_at_end=False,
@@ -335,6 +340,11 @@ def main() -> None:
             tokenizer.save_pretrained(output / "final")
     trainer.save_metrics("train", result.metrics)
     trainer.save_state()
+    if distributed_state.is_main_process and not args.no_final_save:
+        (output / "run_complete.json").write_text(
+            json.dumps({"status": "complete", "final": str(output / "final")}, indent=2) + "\n",
+            encoding="utf-8",
+        )
     distributed_state.wait_for_everyone()
     if not args.no_final_save:
         log(f"model saved to {output / 'final'}")

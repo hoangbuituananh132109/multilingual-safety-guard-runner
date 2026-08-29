@@ -1,5 +1,11 @@
 # Báo cáo dữ liệu Phase 2 sau full build
 
+> Trạng thái lịch sử: báo cáo này mô tả bundle schema v2 đã tạo ngày
+> 2026-08-28. Audit ngày 2026-08-29 xác nhận bundle đó không còn được xem là
+> policy-correct hoặc validation-clean. Không dùng các câu “validate 0 lỗi” bên
+> dưới làm bằng chứng cho causal comparison. Xem
+> `reports/stage2_methodology_audit_20260829.md`.
+
 Ngày inventory: 2026-08-28  
 Nguồn VI được chọn cho run đầu: Gemini  
 Seed cố định: 3407

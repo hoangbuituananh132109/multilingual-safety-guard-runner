@@ -2,6 +2,13 @@
 
 Mục tiêu của runbook là fail sớm trước khi tốn GPU. Không bỏ qua blocker và không chạy full train trước khi smoke 3 step thành công.
 
+> Cảnh báo phương pháp (audit 2026-08-29): bundle schema v2 đã dùng cho run
+> hiện tại là artifact thăm dò, không còn được coi là policy-correct. Nó có
+> taxonomy ON bị lệch theo nhãn, metadata language V3 sai, content overlap qua
+> train/validation và label conflict giữa nguồn. Code schema v3 chặn bundle mới
+> cho tới khi các conflict này được giải quyết theo một policy nghiên cứu được
+> ghi rõ. Xem `reports/stage2_methodology_audit_20260829.md`.
+
 ## 1. Chuẩn bị nguồn
 
 Giữ đúng layout trong `stage2_config.yaml`. Hai file lớn đã kiểm tra trên máy local phải được chép sang máy công ty và xác minh SHA-256:
@@ -71,10 +78,13 @@ Mở `work/stage2/full_gemini/manifest.json` và lưu cùng run. Chỉ tiếp t�
 
 ```bash
 export MODEL_PATH_STAGE1_MERGED=/absolute/path/to/stage1/merged
-python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --max-steps 3 --skip-eval --no-checkpoints --no-final-save
+python3 -m torch.distributed.run --standalone --nproc-per-node=4 core/train.py --config stage2_train_qwen3_8b.yaml --output-dir runs-stage2/_smoke/full --max-steps 3 --skip-eval --no-checkpoints --no-final-save
 ```
 
-Smoke này là disposable; không dùng kết quả để báo metric. Xác nhận model/tokenizer load được, tokenization không lỗi, loss hữu hạn và đủ 3 step.
+Smoke này là disposable và phải dùng output directory riêng; không dùng kết
+quả để báo metric. Xác nhận model/tokenizer load được, tokenization không lỗi,
+loss hữu hạn và đủ 3 step. Không để `train_results.json` của smoke nằm trong
+output directory của run thật.
 
 ## 7. Full train có checkpoint
 

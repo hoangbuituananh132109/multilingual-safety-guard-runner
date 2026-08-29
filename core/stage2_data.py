@@ -26,6 +26,14 @@ REASONING_FIELDS = (
     "efficient_reasoning_deepseek_r1_0528",
 )
 
+# These are the only Nemotron 3.5 train sources that add new text-only safety
+# examples to this blend.  ``aegis_v3_human`` is a multilingual replay of V3,
+# and ``nemotron_content_safety_reasoning_dataset_aegis`` is already consumed
+# from the richer reasoning JSONL.  The remaining sources are image-grounded
+# or topic-following.  Keep this allowlist explicit so a future dataset update
+# cannot silently change the research mixture.
+N35_SELECTED_TEXT_SOURCES = {"text_synthetic", "multimodal_synthetic_2"}
+
 
 def stable_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -93,7 +101,12 @@ def output_payload(prompt_label: str, response_label: str | None, categories: li
     payload: dict[str, str] = {"User Safety": prompt_label}
     if response_label is not None:
         payload["Response Safety"] = response_label
-    if taxonomy_mode == "on" and categories:
+    # NVIDIA's V3/3.5 contract says to omit Safety Categories when all
+    # classified turns are safe.  Some upstream rows retain an auxiliary
+    # category such as "Needs Caution" despite a safe binary verdict; that
+    # annotation must not produce a contradictory safe+category target.
+    any_unsafe = prompt_label == "unsafe" or response_label == "unsafe"
+    if taxonomy_mode == "on" and any_unsafe and categories:
         payload["Safety Categories"] = ", ".join(category for category in N23 if category in set(categories))
         if not payload["Safety Categories"]:
             payload.pop("Safety Categories")
@@ -150,16 +163,16 @@ def assigned_split(source: str, source_id: str, validation_fraction: float) -> s
 
 
 def taxonomy_on_allowed(row: Normalized) -> bool:
-    """Return whether this row has a usable N23 taxonomy label.
+    """Return whether a row can be rendered with the N23 taxonomy visible.
 
-    Rows with no N23 category (including S24-only/unknown-only rows) must stay
-    taxonomy-off. Mixed rows may remain ON, but only their N23 labels are
-    emitted in the target.
+    A safe row needs no category target and is therefore valid in taxonomy-ON
+    mode.  Unsafe rows require at least one usable N23 category; unknown-only
+    unsafe rows stay taxonomy-OFF.  Mixed unsafe rows may remain ON, but only
+    their N23 labels are emitted in the target.
     """
     known = [value for value in row.categories if value in N23]
-    unknown = [value for value in row.categories if value not in N23]
-    verdict = row.response_label if row.response is not None else row.prompt_label
-    return bool(known) and not row.force_taxonomy_off and not (verdict == "unsafe" and unknown and not known)
+    any_unsafe = row.prompt_label == "unsafe" or row.response_label == "unsafe"
+    return not row.force_taxonomy_off and (not any_unsafe or bool(known))
 
 
 def render(
@@ -223,8 +236,9 @@ def render_views(row: Normalized, seed: int) -> list[dict[str, Any]]:
     """Render one deterministic view per semantic record.
 
     Taxonomy ON/OFF is sampled by semantic ID (75/25 for V3 and VI).  The
-    reasoning source uses NVIDIA's dual-mode convention: one stable 50/50
-    THINK/NO-THINK assignment, never a paired duplicate.
+    reasoning source uses this project's stable 50/50 THINK/NO-THINK policy,
+    never a paired duplicate.  The public NVIDIA artifacts expose both modes
+    but do not document this exact sampling ratio.
     """
     if row.source == "wildguardtrain":
         taxonomy_modes = ["off"]
@@ -269,7 +283,7 @@ def vi_records(directory: Path, source_name: str) -> Iterator[Normalized]:
             metadata = {"prompt_semantic_hash": stable_hash(normalized_text(raw.get("prompt_en")))}
             prompt_usable = bool(prompt) and prompt != "REDACTED"
             if prompt_usable and prompt_label in VALID_LABELS:
-                yield Normalized(source_name, source_id, split, "vi", prompt, None, prompt_label, None, [], metadata=metadata)
+                yield Normalized(source_name, source_id, split, "vi", prompt, None, prompt_label, None, categories, metadata=metadata)
             if prompt_usable and response and response_label in VALID_LABELS:
                 yield Normalized(source_name, source_id, split, "vi", prompt, response, prompt_label, response_label, categories, metadata=metadata)
 
@@ -296,9 +310,9 @@ def v3_records(root: Path, languages: list[str], seed: int) -> Iterator[Normaliz
                 response_label = str(raw.get("response_label") or "").lower() or None
                 categories = split_categories(raw.get("violated_categories"))
                 if prompt and prompt_label in VALID_LABELS:
-                    yield Normalized("nemotron_v3_replay", source_id, split, language, prompt, None, prompt_label, None, [])
+                    yield Normalized("nemotron_v3_replay", source_id, split, chosen, prompt, None, prompt_label, None, categories)
                 if prompt and response and response_label in VALID_LABELS:
-                    yield Normalized("nemotron_v3_replay", source_id, split, language, prompt, response, prompt_label, response_label, categories)
+                    yield Normalized("nemotron_v3_replay", source_id, split, chosen, prompt, response, prompt_label, response_label, categories)
 
 
 def reasoning_records(path: Path, validation_fraction: float, seed: int) -> Iterator[Normalized]:
@@ -374,8 +388,7 @@ def nemotron35_records(path: Path, validation_fraction: float, excluded_hashes: 
     for raw in table.to_pylist():
         if raw.get("image_path") or str(raw.get("task_type")) != "safety":
             continue
-        synthetic = raw.get("provenance") == "synthetic" or raw.get("prompt_source") == "synthetic" or "synthetic" in str(raw.get("dataset_source") or "")
-        if not synthetic:
+        if str(raw.get("dataset_source") or "") not in N35_SELECTED_TEXT_SOURCES:
             continue
         prompt = str(raw.get("prompt") or "").strip()
         response = raw.get("response")
@@ -664,8 +677,14 @@ def build_dataset(
                 counters[f"source:{name}:split:{row.split}"] += 1
                 counters[f"taxonomy:{value['taxonomy_mode']}"] += 1
                 counters[f"thinking:{value['thinking_mode']}"] += 1
+                counters[f"source:{name}:taxonomy:{value['taxonomy_mode']}"] += 1
+                counters[f"source:{name}:thinking:{value['thinking_mode']}"] += 1
                 counters[f"view:{value['view']}"] += 1
                 counters[f"label:{value['safety_label']}"] += 1
+                any_unsafe = value["prompt_safety_label"] == "unsafe" or (
+                    value["view"] == "PR" and value["safety_label"] == "unsafe"
+                )
+                counters[f"source:{name}:any_unsafe:{any_unsafe}"] += 1
                 counters[f"unknown_categories:{len(value['unknown_categories']) > 0}"] += 1
             taken[row.split] += 1
 
@@ -679,6 +698,28 @@ def build_dataset(
         consume("nemotron_reasoning_28k", reasoning_records(source_paths["reasoning"], validation_fraction, seed))
     if "nemotron35" not in excluded_sources and source_paths["nemotron35"].exists():
         consume("nemotron35_selected", nemotron35_records(source_paths["nemotron35"], validation_fraction, selected_content_hashes))
+
+    integrity_blockers: list[str] = []
+    content_groups: dict[str, dict[str, set[Any]]] = defaultdict(lambda: {"splits": set(), "labels": set()})
+    for split, values in rendered.items():
+        for value in values:
+            content_id = str(value["content_sha256"])
+            content_groups[content_id]["splits"].add(split)
+            content_groups[content_id]["labels"].add(
+                (
+                    value["prompt_safety_label"],
+                    value["safety_label"] if value["view"] == "PR" else None,
+                )
+            )
+    cross_split_content = sum(len(group["splits"]) > 1 for group in content_groups.values())
+    conflicting_labels = sum(len(group["labels"]) > 1 for group in content_groups.values())
+    counters["integrity:cross_split_content_hashes"] = cross_split_content
+    counters["integrity:conflicting_label_hashes"] = conflicting_labels
+    if cross_split_content:
+        integrity_blockers.append(f"{cross_split_content} content hashes occur in both train and validation")
+    if conflicting_labels:
+        integrity_blockers.append(f"{conflicting_labels} content hashes have conflicting safety labels")
+    blockers.extend(integrity_blockers)
 
     cross_split = split_semantics["train"] & split_semantics["validation"]
     if cross_split:
@@ -711,14 +752,14 @@ def build_dataset(
         message = "no rendered examples for: " + ", ".join(missing_rendered)
         blockers.append(message)
         source_blockers.append(message)
-    training_ready = not source_blockers and not smoke_per_source
+    training_ready = not source_blockers and not integrity_blockers and not smoke_per_source
     status = "ready" if training_ready and not blockers else "blocked"
     if training_ready and blockers:
         status = "ready_for_training_eval_pending"
     if smoke_per_source:
         status = "smoke_ready" if not blockers else "smoke_ready_incomplete"
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": status,
         "training_ready": training_ready,
         "full_ready": not blockers and not smoke_per_source,
@@ -733,6 +774,7 @@ def build_dataset(
         "benchmark_hash_count": len(leakage_hashes),
         "blockers": blockers,
         "source_blockers": source_blockers,
+        "integrity_blockers": integrity_blockers,
         "warnings": warnings,
     }
     manifest_path = output_dir / "manifest.json"
@@ -743,6 +785,8 @@ def build_dataset(
 def validate_dataset(directory: Path) -> dict[str, Any]:
     seen_examples: dict[str, str] = {}
     semantic_splits: dict[str, str] = {}
+    content_splits: dict[str, str] = {}
+    content_labels: dict[str, tuple[str, str | None]] = {}
     counts: Counter[str] = Counter()
     errors: list[str] = []
     for split in ("train", "validation"):
@@ -765,6 +809,23 @@ def validate_dataset(directory: Path) -> dict[str, Any]:
                 errors.append(f"{path}:{row['_line']}: cross-split semantic_id first seen in {semantic_splits[semantic_id]}")
             else:
                 semantic_splits[semantic_id] = split
+            content_id = str(row.get("content_sha256") or "")
+            label_pair = (
+                str(row.get("prompt_safety_label") or ""),
+                str(row.get("safety_label") or "") if row.get("view") == "PR" else None,
+            )
+            if content_id:
+                if content_id in content_splits and content_splits[content_id] != split:
+                    errors.append(f"{path}:{row['_line']}: cross-split content_sha256 first seen in {content_splits[content_id]}")
+                else:
+                    content_splits[content_id] = split
+                if content_id in content_labels and content_labels[content_id] != label_pair:
+                    errors.append(
+                        f"{path}:{row['_line']}: conflicting labels for content_sha256 "
+                        f"{content_labels[content_id]} vs {label_pair}"
+                    )
+                else:
+                    content_labels[content_id] = label_pair
             for field in ("instruction", "target", "prompt", "safety_label", "view", "taxonomy_mode", "thinking_mode"):
                 if row.get(field) in (None, ""):
                     errors.append(f"{path}:{row['_line']}: missing {field}")
@@ -785,6 +846,13 @@ def validate_dataset(directory: Path) -> dict[str, Any]:
                 parsed = json.loads(final)
                 if not isinstance(parsed, dict):
                     raise ValueError("target JSON is not an object")
+                any_unsafe = row.get("prompt_safety_label") == "unsafe" or (
+                    row.get("view") == "PR" and row.get("safety_label") == "unsafe"
+                )
+                if not any_unsafe and "Safety Categories" in parsed:
+                    errors.append(f"{path}:{row['_line']}: all-safe target must omit Safety Categories")
+                if row.get("taxonomy_mode") == "on" and any_unsafe and "Safety Categories" not in parsed:
+                    errors.append(f"{path}:{row['_line']}: taxonomy-on unsafe target is missing Safety Categories")
             except (json.JSONDecodeError, ValueError) as exc:
                 errors.append(f"{path}:{row['_line']}: invalid final target JSON: {exc}")
             counts[f"split:{split}"] += 1
