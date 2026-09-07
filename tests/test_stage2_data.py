@@ -7,7 +7,17 @@ from collections import Counter
 from pathlib import Path
 
 from core.prompt import nemotron_instruction, render_prompt
-from core.stage2_data import N23, Normalized, output_payload, render, render_views, validate_dataset, v3_records, vi_records
+from core.stage2_data import (
+    N23,
+    Normalized,
+    apply_content_integrity_policy,
+    output_payload,
+    render,
+    render_views,
+    validate_dataset,
+    v3_records,
+    vi_records,
+)
 
 
 class Stage2DataTests(unittest.TestCase):
@@ -183,6 +193,31 @@ class Stage2DataTests(unittest.TestCase):
             result = validate_dataset(root)
             self.assertFalse(result["valid"])
             self.assertTrue(any("conflicting labels for content_sha256" in error for error in result["errors"]))
+
+    def test_quarantine_removes_cross_split_content_group(self) -> None:
+        train = render(Normalized("a", "one", "train", "en", "p", None, "safe", None, []), 3407)
+        validation = render(Normalized("b", "two", "validation", "en", "p", None, "safe", None, []), 3407)
+        filtered, audit = apply_content_integrity_policy(
+            {"train": [train], "validation": [validation]},
+            "quarantine",
+        )
+        self.assertEqual(filtered["train"], [])
+        self.assertEqual(filtered["validation"], [])
+        self.assertEqual(audit["initial_cross_split_content_hashes"], 1)
+        self.assertEqual(audit["quarantined_content_hashes"], 1)
+        self.assertEqual(audit["remaining_cross_split_content_hashes"], 0)
+
+    def test_quarantine_removes_both_sides_of_label_conflict(self) -> None:
+        safe = render(Normalized("a", "one", "train", "en", "p", None, "safe", None, []), 3407)
+        unsafe = render(Normalized("b", "two", "train", "en", "p", None, "unsafe", None, [N23[0]]), 3407)
+        filtered, audit = apply_content_integrity_policy(
+            {"train": [safe, unsafe], "validation": []},
+            "quarantine",
+        )
+        self.assertEqual(filtered["train"], [])
+        self.assertEqual(audit["initial_conflicting_label_hashes"], 1)
+        self.assertEqual(audit["quarantined_rows"], 2)
+        self.assertEqual(audit["remaining_conflicting_label_hashes"], 0)
 
 
 if __name__ == "__main__":

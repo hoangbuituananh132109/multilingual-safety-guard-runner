@@ -89,8 +89,9 @@ run_cell() {
   local output="$OUTPUT_ROOT/$name/$tag"
   local log="$LOG_ROOT/${name}_${tag}.log"
 
-  if [[ "$FORCE" != "1" && -f "$output/metrics.json" ]]; then
-    echo "[$(date -Is)] SKIP GPU=$GPU model=$name cell=$tag (metrics.json exists)"
+  if [[ "$FORCE" != "1" && -f "$output/metrics.json" ]] && \
+     grep -q '"status": "complete"' "$output/progress.json" 2>/dev/null; then
+    echo "[$(date -Is)] SKIP GPU=$GPU model=$name cell=$tag (complete metrics exist)"
     return 0
   fi
 
@@ -118,7 +119,8 @@ run_cell() {
     "${sample_args[@]}" \
     2>&1 | tee "$log"
   test -f "$output/metrics.json"
-  grep -q '"status": "finished"' "$output/progress.json"
+  # core/evaluate.py writes the terminal state as "complete".
+  grep -q '"status": "complete"' "$output/progress.json"
   echo "[$(date -Is)] DONE GPU=$GPU model=$name cell=$tag"
 }
 

@@ -175,6 +175,111 @@ def taxonomy_on_allowed(row: Normalized) -> bool:
     return not row.force_taxonomy_off and (not any_unsafe or bool(known))
 
 
+def apply_content_integrity_policy(
+    rendered: dict[str, list[dict[str, Any]]],
+    policy: str,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Audit exact-content leakage/conflicts and optionally quarantine them.
+
+    ``block`` preserves every rendered row and reports integrity defects.  The
+    replacement Stage-2 study uses ``quarantine``: every exact-content group
+    that crosses train/validation or carries contradictory binary labels is
+    removed in full.  Dropping the whole ambiguous group avoids inventing a
+    source-priority rule merely to make validation pass.
+    """
+    if policy not in {"block", "quarantine"}:
+        raise ValueError("integrity policy must be 'block' or 'quarantine'")
+
+    groups: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"splits": set(), "labels": set(), "rows": []}
+    )
+    for split, values in rendered.items():
+        for value in values:
+            content_id = str(value["content_sha256"])
+            groups[content_id]["splits"].add(split)
+            groups[content_id]["labels"].add(
+                (
+                    value["prompt_safety_label"],
+                    value["safety_label"] if value["view"] == "PR" else None,
+                )
+            )
+            groups[content_id]["rows"].append((split, value))
+
+    cross_split = {key for key, group in groups.items() if len(group["splits"]) > 1}
+    conflicting = {key for key, group in groups.items() if len(group["labels"]) > 1}
+    quarantined = cross_split | conflicting if policy == "quarantine" else set()
+    quarantine_by_source: Counter[str] = Counter()
+    filtered: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for split, values in rendered.items():
+        for value in values:
+            if str(value["content_sha256"]) in quarantined:
+                quarantine_by_source[str(value["dataset_source"])] += 1
+            else:
+                filtered[split].append(value)
+
+    remaining_cross_split = cross_split - quarantined
+    remaining_conflicting = conflicting - quarantined
+    return filtered, {
+        "policy": policy,
+        "initial_cross_split_content_hashes": len(cross_split),
+        "initial_conflicting_label_hashes": len(conflicting),
+        "quarantined_content_hashes": len(quarantined),
+        "quarantined_rows": sum(len(groups[key]["rows"]) for key in quarantined),
+        "quarantined_rows_by_source": dict(sorted(quarantine_by_source.items())),
+        "remaining_cross_split_content_hashes": len(remaining_cross_split),
+        "remaining_conflicting_label_hashes": len(remaining_conflicting),
+    }
+
+
+def rendered_counts(rendered: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
+    """Return counts for rows that will actually be written after filtering."""
+    result: Counter[str] = Counter()
+    for split, values in rendered.items():
+        for value in values:
+            source = str(value["dataset_source"])
+            view = str(value["view"])
+            taxonomy = str(value["taxonomy_mode"])
+            label = str(value["safety_label"])
+            result["rows"] += 1
+            result[f"split:{split}"] += 1
+            result[f"source:{source}"] += 1
+            result[f"view:{view}"] += 1
+            result[f"taxonomy:{taxonomy}"] += 1
+            result[f"thinking:{value['thinking_mode']}"] += 1
+            result[f"source:{source}:view:{view}:taxonomy:{taxonomy}:label:{label}"] += 1
+    return dict(sorted(result.items()))
+
+
+def taxonomy_label_audit(rendered: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Expose whether prompt mode became a shortcut for the binary label."""
+    counts: Counter[tuple[str, str, str, str]] = Counter()
+    for values in rendered.values():
+        for value in values:
+            source = str(value["dataset_source"])
+            view = str(value["view"])
+            taxonomy = str(value["taxonomy_mode"])
+            label = str(value["safety_label"])
+            counts[("ALL", view, taxonomy, label)] += 1
+            counts[(source, view, taxonomy, label)] += 1
+
+    result: dict[str, Any] = {}
+    scopes = sorted({(source, view) for source, view, _, _ in counts})
+    for source, view in scopes:
+        scope: dict[str, Any] = {}
+        for taxonomy in ("on", "off"):
+            safe = counts[(source, view, taxonomy, "safe")]
+            unsafe = counts[(source, view, taxonomy, "unsafe")]
+            total = safe + unsafe
+            scope[taxonomy] = {
+                "safe": safe,
+                "unsafe": unsafe,
+                "total": total,
+                "unsafe_rate": unsafe / total if total else None,
+            }
+        result[f"{source}:{view}"] = scope
+    return result
+
+
 def render(
     row: Normalized,
     seed: int,
@@ -282,6 +387,9 @@ def vi_records(directory: Path, source_name: str) -> Iterator[Normalized]:
             categories = split_categories(raw.get("violated_categories"))
             metadata = {"prompt_semantic_hash": stable_hash(normalized_text(raw.get("prompt_en")))}
             prompt_usable = bool(prompt) and prompt != "REDACTED"
+            # Schema-v3 correction: prompt-only rows must retain the upstream
+            # category.  Clearing it here made every VI P row taxonomy-OFF and
+            # turned taxonomy prompt presence into an unsafe-label shortcut.
             if prompt_usable and prompt_label in VALID_LABELS:
                 yield Normalized(source_name, source_id, split, "vi", prompt, None, prompt_label, None, categories, metadata=metadata)
             if prompt_usable and response and response_label in VALID_LABELS:
@@ -309,6 +417,8 @@ def v3_records(root: Path, languages: list[str], seed: int) -> Iterator[Normaliz
                 prompt_label = str(raw.get("prompt_label") or "").lower()
                 response_label = str(raw.get("response_label") or "").lower() or None
                 categories = split_categories(raw.get("violated_categories"))
+                # Keep categories for P as well as PR.  The schema-v2 builder
+                # discarded them here, so V3 prompt-only taxonomy ON vanished.
                 if prompt and prompt_label in VALID_LABELS:
                     yield Normalized("nemotron_v3_replay", source_id, split, chosen, prompt, None, prompt_label, None, categories)
                 if prompt and response and response_label in VALID_LABELS:
@@ -601,6 +711,7 @@ def build_dataset(
     smoke_per_source: int = 0,
     allow_incomplete: bool = False,
     excluded_sources: set[str] | None = None,
+    integrity_policy: str = "block",
 ) -> dict[str, Any]:
     stage = cfg["stage2"]
     sources = cfg["sources"]
@@ -699,22 +810,14 @@ def build_dataset(
     if "nemotron35" not in excluded_sources and source_paths["nemotron35"].exists():
         consume("nemotron35_selected", nemotron35_records(source_paths["nemotron35"], validation_fraction, selected_content_hashes))
 
+    rendered, integrity_audit = apply_content_integrity_policy(rendered, integrity_policy)
     integrity_blockers: list[str] = []
-    content_groups: dict[str, dict[str, set[Any]]] = defaultdict(lambda: {"splits": set(), "labels": set()})
-    for split, values in rendered.items():
-        for value in values:
-            content_id = str(value["content_sha256"])
-            content_groups[content_id]["splits"].add(split)
-            content_groups[content_id]["labels"].add(
-                (
-                    value["prompt_safety_label"],
-                    value["safety_label"] if value["view"] == "PR" else None,
-                )
-            )
-    cross_split_content = sum(len(group["splits"]) > 1 for group in content_groups.values())
-    conflicting_labels = sum(len(group["labels"]) > 1 for group in content_groups.values())
+    cross_split_content = int(integrity_audit["remaining_cross_split_content_hashes"])
+    conflicting_labels = int(integrity_audit["remaining_conflicting_label_hashes"])
     counters["integrity:cross_split_content_hashes"] = cross_split_content
     counters["integrity:conflicting_label_hashes"] = conflicting_labels
+    counters["integrity:quarantined_content_hashes"] = int(integrity_audit["quarantined_content_hashes"])
+    counters["integrity:quarantined_rows"] = int(integrity_audit["quarantined_rows"])
     if cross_split_content:
         integrity_blockers.append(f"{cross_split_content} content hashes occur in both train and validation")
     if conflicting_labels:
@@ -771,6 +874,9 @@ def build_dataset(
         "source_revisions": cfg.get("source_revisions", {}),
         "splits": split_reports,
         "counts": dict(sorted(counters.items())),
+        "final_counts": rendered_counts(rendered),
+        "taxonomy_label_audit": taxonomy_label_audit(rendered),
+        "integrity": integrity_audit,
         "benchmark_hash_count": len(leakage_hashes),
         "blockers": blockers,
         "source_blockers": source_blockers,

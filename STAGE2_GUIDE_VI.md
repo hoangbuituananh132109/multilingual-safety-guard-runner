@@ -136,3 +136,63 @@ YAML chỉ định rồi chạy GPU smoke 3 step trước full train.
 ```bash
 hf upload <ORG>/<DATASET_REPO> stage2_bundle.zip stage2_bundle.zip --repo-type dataset
 ```
+
+## 10. Replacement study sau khi sửa taxonomy shortcut
+
+Lần cập nhật schema-v3 ngày 2026-08-29 sửa hai nguyên nhân trực tiếp làm
+taxonomy prompt trở thành tín hiệu nhãn: mẫu safe được phép dùng taxonomy ON,
+và mẫu prompt-only V3/VI giữ lại category upstream. Replacement study còn
+dùng `--integrity-policy quarantine` để bỏ toàn bộ exact-content group bị
+chéo train/validation hoặc có nhãn mâu thuẫn; manifest ghi rõ số hash và số
+dòng đã loại, không tự chọn nhãn hay ưu tiên nguồn.
+
+Script dưới đây dùng các output directory mới, không ghi đè run schema-v2 cũ.
+Nó cài hoặc build và validate ba arm, smoke đúng 1 optimizer step cho từng arm, train
+tuần tự ba run 1 epoch trên cả bốn GPU, merge, rồi chạy full benchmark ở bốn
+chế độ taxonomy/thinking. Trước full eval, nó smoke cả 12 ô với 8 mẫu mỗi
+benchmark vào thư mục riêng. Mỗi eval dùng đúng một GPU; bốn worker được phân
+công tự động và chạy song song.
+
+Nếu máy công ty không có raw source, tải ba ZIP schema-v3 từ
+[HF offline-zips](https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips/tree/main)
+vào thư mục `zip/`, rồi dùng `bundle-all`. Không dùng lại ba ZIP schema-v2.
+
+```bash
+mkdir -p zip logs
+wget -c https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips/resolve/main/stage2_corrected_vi_gemini_1e.zip -O zip/stage2_corrected_vi_gemini_1e.zip
+wget -c https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips/resolve/main/stage2_corrected_reasoning_1e.zip -O zip/stage2_corrected_reasoning_1e.zip
+wget -c https://huggingface.co/datasets/TuanAnhHoangBui/safety-guard-offline-zips/resolve/main/stage2_corrected_full_1e.zip -O zip/stage2_corrected_full_1e.zip
+sha256sum zip/stage2_corrected_*_1e.zip
+```
+
+```bash
+export MODEL_PATH_STAGE1_MERGED="$PWD/runs/qwen3_8b/lora_full/merged"
+nohup bash scripts/run_stage2_corrected_study.sh bundle-all > logs/stage2_corrected_master.log 2>&1 &
+echo $! > logs/stage2_corrected_master.pid
+```
+
+Chỉ khi máy đã có đủ raw source pinned và muốn tự render lại dữ liệu mới dùng
+`scripts/run_stage2_corrected_study.sh all`; `bundle-all` là lệnh khuyến nghị
+cho máy công ty hạn chế mạng.
+
+Điều kiện fail-fast trước khi dùng GPU:
+
+- đủ sáu file trong `work/benchmarks` để leakage audit và full eval;
+- ba manifest data có `full_ready=true`, `training_ready=true`, blocker rỗng;
+- model Stage-1 merged có config và tokenizer;
+- thấy ít nhất bốn CUDA device và mỗi GPU dùng không quá 2 GiB trước khi bắt
+  đầu (chỉ override bằng `STAGE2_ALLOW_BUSY_GPUS=1` sau khi tự kiểm tra).
+
+Có thể chạy lại theo phase mà không nhầm artifact dở là hoàn thành:
+
+```bash
+bash scripts/run_stage2_corrected_study.sh data
+bash scripts/run_stage2_corrected_study.sh install
+bash scripts/run_stage2_corrected_study.sh smoke
+bash scripts/run_stage2_corrected_study.sh train
+bash scripts/run_stage2_corrected_study.sh eval
+```
+
+Kết quả tổng hợp cùng định nghĩa Bảng 2 được ghi thành một bảng duy nhất tại
+`runs-stage2/qwen3_8b/corrected_study/results.md` và `.csv/.json`. Script chỉ
+skip một eval khi đồng thời có `metrics.json` và `progress.status=complete`.

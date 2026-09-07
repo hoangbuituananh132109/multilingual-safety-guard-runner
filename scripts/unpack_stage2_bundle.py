@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import zipfile
 from hashlib import sha256
 from pathlib import Path
@@ -21,6 +22,11 @@ def main() -> None:
     parser.add_argument("--zip", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--flatten-data",
+        action="store_true",
+        help="Place train.jsonl, validation.jsonl and manifest.json directly in output-dir.",
+    )
     args = parser.parse_args()
     output = args.output_dir.resolve()
     if output.exists() and any(output.iterdir()) and not args.force:
@@ -35,10 +41,20 @@ def main() -> None:
             target = (output / member.filename).resolve()
             if not target.is_relative_to(output):
                 raise SystemExit(f"Refusing path-traversal archive member: {member.filename}")
-        archive.extractall(output)
+        if args.flatten_data:
+            # Training configs point at output-dir/train.jsonl.  Keep the
+            # portable ZIP layout stable while supporting that layout without
+            # a manual move after extraction.
+            for member_name in sorted(required):
+                target_name = Path(member_name).name if member_name.startswith("data/") else member_name
+                target = output / target_name
+                with archive.open(member_name) as source, target.open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+        else:
+            archive.extractall(output)
     bundle = json.loads((output / "bundle_manifest.json").read_text(encoding="utf-8"))
     for name, expected in bundle["files"].items():
-        path = output / "data" / name
+        path = output / name if args.flatten_data else output / "data" / name
         if digest(path) != expected["sha256"]:
             raise SystemExit(f"SHA-256 mismatch after extraction: {path}")
     print(json.dumps({"output_dir": str(output), "verified": True, "source_status": bundle["source_manifest"].get("status")}, indent=2))

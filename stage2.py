@@ -27,6 +27,15 @@ def main() -> None:
     build.add_argument("--smoke-per-source", type=int, default=0)
     build.add_argument("--allow-incomplete", action="store_true")
     build.add_argument(
+        "--integrity-policy",
+        choices=("block", "quarantine"),
+        default="block",
+        help=(
+            "block reports exact-content split/label conflicts as blockers; "
+            "quarantine removes every affected content group and records counts in the manifest"
+        ),
+    )
+    build.add_argument(
         "--exclude-source",
         action="append",
         choices=("v3", "vi", "wildguard", "reasoning", "nemotron35"),
@@ -61,6 +70,7 @@ def main() -> None:
                 smoke_per_source=args.smoke_per_source,
                 allow_incomplete=args.allow_incomplete,
                 excluded_sources=set(args.exclude_source),
+                integrity_policy=args.integrity_policy,
             )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if args.command == "validate" and not result["valid"]:
