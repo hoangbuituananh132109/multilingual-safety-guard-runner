@@ -29,6 +29,17 @@ class Stage2DataTests(unittest.TestCase):
         self.assertNotIn("<BEGIN UNSAFE CONTENT CATEGORIES>", taxonomy_off)
         self.assertNotIn("Safety Categories", taxonomy_off)
 
+        thinking = render_prompt(
+            tokenizer,
+            "nemotron",
+            "hello",
+            None,
+            taxonomy_mode="on",
+            thinking_mode="think",
+        )
+        self.assertIn("Think briefly before answering", thinking)
+        self.assertTrue(thinking.endswith("<think>\n"))
+
     def test_taxonomy_off_instruction_and_target_omit_categories(self) -> None:
         instruction = nemotron_instruction("prompt", None, taxonomy_mode="off")
         target = output_payload("unsafe", None, [N23[0]], "off")

@@ -101,4 +101,9 @@ def render_prompt(
         taxonomy_mode=taxonomy_mode,
         thinking_mode=thinking_mode,
     )
-    return render_instruction(tokenizer, instruction, enable_thinking=thinking_mode == "think")
+    rendered = render_instruction(tokenizer, instruction, enable_thinking=thinking_mode == "think")
+    if thinking_mode == "think" and "<think>" not in rendered[-128:]:
+        # Match the training fallback for tokenizers/templates that accept but
+        # do not expose Qwen's enable_thinking prefill in the rendered prompt.
+        rendered = rendered.rstrip() + "\n<think>\n"
+    return rendered

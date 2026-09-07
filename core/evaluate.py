@@ -163,6 +163,12 @@ def main() -> None:
         default="on",
         help="Nemotron prompt variant. Keep all other evaluation settings fixed for ON/OFF ablations.",
     )
+    parser.add_argument(
+        "--thinking-mode",
+        choices=["no_think", "think"],
+        default="no_think",
+        help="Qwen reasoning mode used to render the guard instruction.",
+    )
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--backend", choices=["transformers", "vllm"], default="transformers")
@@ -252,6 +258,7 @@ def main() -> None:
                     str(prompt),
                     str(response) if response is not None else None,
                     taxonomy_mode=args.taxonomy_mode,
+                    thinking_mode=args.thinking_mode,
                 )
                 ids = tokenizer.encode(rendered, add_special_tokens=False)
                 if len(ids) > args.max_input_tokens:
@@ -305,6 +312,7 @@ def main() -> None:
                 all_predictions.append({
                     "benchmark": name,
                     "taxonomy_mode": args.taxonomy_mode,
+                    "thinking_mode": args.thinking_mode,
                     "example_id": row.get("example_id"),
                     "language": row.get("language"),
                     "view": row.get("view"),
@@ -399,6 +407,7 @@ def main() -> None:
                     all_predictions.append({
                         "benchmark": name,
                         "taxonomy_mode": args.taxonomy_mode,
+                        "thinking_mode": args.thinking_mode,
                         "example_id": row.get("example_id"),
                         "language": row.get("language"),
                         "view": row.get("view"),
@@ -461,6 +470,11 @@ def main() -> None:
         if args.taxonomy_mode == "on"
         else NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE
     )
+    if args.thinking_mode == "think":
+        prompt_template = prompt_template.replace(
+            "Do not include anything other than the output JSON in your response.",
+            "Think briefly before answering, then provide only the output JSON as the final answer.",
+        )
     run_manifest = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "base_model": args.base_model,
@@ -470,6 +484,7 @@ def main() -> None:
         "backend": args.backend,
         "decoding_profile": args.decoding_profile,
         "taxonomy_mode": args.taxonomy_mode if args.family == "nemotron" else None,
+        "thinking_mode": args.thinking_mode if args.family == "nemotron" else None,
         "seed": args.seed,
         "parse_error_policy": args.parse_error_policy,
         "prompt_template_sha256": hashlib.sha256(prompt_template.encode("utf-8")).hexdigest() if args.family == "nemotron" else None,
