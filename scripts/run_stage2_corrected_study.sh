@@ -182,6 +182,11 @@ preflight_ready() {
   dataset_ready "$DATA_REASONING"
   dataset_ready "$DATA_FULL"
   require_four_free_gpus
+  if ! "$PYTHON_BIN" core/train.py --help 2>&1 | grep -q -- "--output-dir"; then
+    echo "core/train.py is stale: missing --output-dir (required for isolated smoke outputs)." >&2
+    echo "Update core/train.py from branch no-dataset commit c9fb666 or newer before using any GPU." >&2
+    exit 1
+  fi
   "$PYTHON_BIN" -c 'import accelerate,datasets,peft,torch,transformers,vllm,yaml; print("Python training/eval imports: OK")'
   echo "[$(date -Is)] PREFLIGHT PASSED"
 }
