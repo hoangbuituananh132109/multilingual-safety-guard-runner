@@ -81,11 +81,24 @@ def render_instruction(tokenizer: Any, instruction: str, *, enable_thinking: boo
         return tokenizer.apply_chat_template([{"role": "user", "content": instruction}], **kwargs)
 
 
-def render_prompt(tokenizer: Any, family: str, prompt: str, response: str | None) -> str:
+def render_prompt(
+    tokenizer: Any,
+    family: str,
+    prompt: str,
+    response: str | None,
+    *,
+    taxonomy_mode: str = "on",
+    thinking_mode: str = "no_think",
+) -> str:
     if family == "qwen_binary":
         messages = [{"role": "user", "content": prompt}]
         if response is not None:
             messages.append({"role": "assistant", "content": response})
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False, enable_thinking=False)
-    instruction = nemotron_instruction(prompt, response)
-    return render_instruction(tokenizer, instruction, enable_thinking=False)
+    instruction = nemotron_instruction(
+        prompt,
+        response,
+        taxonomy_mode=taxonomy_mode,
+        thinking_mode=thinking_mode,
+    )
+    return render_instruction(tokenizer, instruction, enable_thinking=thinking_mode == "think")

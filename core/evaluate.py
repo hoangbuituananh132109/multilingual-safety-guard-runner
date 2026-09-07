@@ -18,7 +18,7 @@ def log(message: str) -> None:
 
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 
-from prompt import N23, NEMOTRON_PROMPT_TEMPLATE, render_prompt
+from prompt import N23, NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE, NEMOTRON_PROMPT_TEMPLATE, render_prompt
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -157,6 +157,12 @@ def main() -> None:
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"], default="greedy")
+    parser.add_argument(
+        "--taxonomy-mode",
+        choices=["on", "off"],
+        default="on",
+        help="Nemotron prompt variant. Keep all other evaluation settings fixed for ON/OFF ablations.",
+    )
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--load-in-4bit", action="store_true")
     parser.add_argument("--backend", choices=["transformers", "vllm"], default="transformers")
@@ -240,7 +246,13 @@ def main() -> None:
                     first, marker, second = text.partition("\nResponse:")
                     prompt = first.removeprefix("Prompt:").lstrip()
                     response = second.lstrip() if marker else None
-                rendered = render_prompt(tokenizer, args.family, str(prompt), str(response) if response is not None else None)
+                rendered = render_prompt(
+                    tokenizer,
+                    args.family,
+                    str(prompt),
+                    str(response) if response is not None else None,
+                    taxonomy_mode=args.taxonomy_mode,
+                )
                 ids = tokenizer.encode(rendered, add_special_tokens=False)
                 if len(ids) > args.max_input_tokens:
                     half = args.max_input_tokens // 2
@@ -292,6 +304,7 @@ def main() -> None:
                     prediction_for_metrics = None
                 all_predictions.append({
                     "benchmark": name,
+                    "taxonomy_mode": args.taxonomy_mode,
                     "example_id": row.get("example_id"),
                     "language": row.get("language"),
                     "view": row.get("view"),
@@ -385,6 +398,7 @@ def main() -> None:
                         prediction_for_metrics = None
                     all_predictions.append({
                         "benchmark": name,
+                        "taxonomy_mode": args.taxonomy_mode,
                         "example_id": row.get("example_id"),
                         "language": row.get("language"),
                         "view": row.get("view"),
@@ -442,6 +456,11 @@ def main() -> None:
     with (args.output_dir / "metrics.csv").open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(result_rows[0])); writer.writeheader(); writer.writerows(result_rows)
     (args.output_dir / "metrics.json").write_text(json.dumps(result_rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    prompt_template = (
+        NEMOTRON_PROMPT_TEMPLATE
+        if args.taxonomy_mode == "on"
+        else NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE
+    )
     run_manifest = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "base_model": args.base_model,
@@ -450,9 +469,10 @@ def main() -> None:
         "family": args.family,
         "backend": args.backend,
         "decoding_profile": args.decoding_profile,
+        "taxonomy_mode": args.taxonomy_mode if args.family == "nemotron" else None,
         "seed": args.seed,
         "parse_error_policy": args.parse_error_policy,
-        "prompt_template_sha256": hashlib.sha256(NEMOTRON_PROMPT_TEMPLATE.encode("utf-8")).hexdigest() if args.family == "nemotron" else None,
+        "prompt_template_sha256": hashlib.sha256(prompt_template.encode("utf-8")).hexdigest() if args.family == "nemotron" else None,
         "protocol_note": "SEA rows evaluated with the configured model-native guard prompt; this is not the official SEA-HELM prompt/leaderboard protocol.",
     }
     (args.output_dir / "run_manifest.json").write_text(json.dumps(run_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

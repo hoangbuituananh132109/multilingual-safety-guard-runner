@@ -214,7 +214,7 @@ def merged_adapter_path(base_model: str, adapter: Path, destination: Path, dry_r
     ], dry_run=False)
     return merged
 
-def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers", decoding_profile: str = "greedy", output_tag: str = "guard", tensor_parallel_size: int = 1) -> None:
+def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, method: str, mode: str, limit: int | None, sample: int | None, dry_run: bool, backend: str = "transformers", decoding_profile: str = "greedy", output_tag: str = "guard", tensor_parallel_size: int = 1, taxonomy_mode: str = "on") -> None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", output_tag):
         raise ValueError("--output-tag may contain only letters, numbers, dot, underscore, and dash")
     base_model, adapter, destination, revisions = evaluation_source(config, model, checkpoint, method, mode)
@@ -235,6 +235,7 @@ def evaluate(config: dict[str, Any], model: dict[str, Any], checkpoint: str, met
         "--tensor-parallel-size", str(tensor_parallel_size),
         "--backend", backend,
         "--decoding-profile", decoding_profile,
+        "--taxonomy-mode", taxonomy_mode,
         *benchmark_args(config),
     ]
     if adapter is not None:
@@ -594,6 +595,7 @@ def main() -> None:
         if command == "evaluate":
             value.add_argument("--backend", choices=["transformers", "vllm"])
             value.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"])
+            value.add_argument("--taxonomy-mode", choices=["on", "off"], default="on")
             value.add_argument("--output-tag", default="guard")
             value.add_argument("--gpus", type=int, default=1)
     train_parser = subparsers.add_parser("train")
@@ -711,7 +713,7 @@ def main() -> None:
         if args.command == "evaluate":
             backend = args.backend or str(config["evaluation"].get("backend", "transformers"))
             decoding_profile = args.decoding_profile or str(config["evaluation"].get("decoding_profile", "greedy"))
-            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend, decoding_profile, args.output_tag, getattr(args, "gpus", 1))
+            evaluate(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run, backend, decoding_profile, args.output_tag, getattr(args, "gpus", 1), args.taxonomy_mode)
         elif args.command == "likelihood":
             likelihood(config, model, args.checkpoint, args.method, args.run_mode, args.limit, args.sample, args.dry_run)
         elif args.command == "train":

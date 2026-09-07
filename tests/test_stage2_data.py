@@ -6,11 +6,29 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-from core.prompt import nemotron_instruction
+from core.prompt import nemotron_instruction, render_prompt
 from core.stage2_data import N23, Normalized, output_payload, render, render_views, validate_dataset, v3_records, vi_records
 
 
 class Stage2DataTests(unittest.TestCase):
+    def test_render_prompt_supports_taxonomy_ablation(self) -> None:
+        class Tokenizer:
+            def apply_chat_template(self, messages, **_kwargs):
+                return messages[0]["content"]
+
+        tokenizer = Tokenizer()
+        taxonomy_on = render_prompt(tokenizer, "nemotron", "hello", None)
+        taxonomy_off = render_prompt(
+            tokenizer,
+            "nemotron",
+            "hello",
+            None,
+            taxonomy_mode="off",
+        )
+        self.assertIn("<BEGIN UNSAFE CONTENT CATEGORIES>", taxonomy_on)
+        self.assertNotIn("<BEGIN UNSAFE CONTENT CATEGORIES>", taxonomy_off)
+        self.assertNotIn("Safety Categories", taxonomy_off)
+
     def test_taxonomy_off_instruction_and_target_omit_categories(self) -> None:
         instruction = nemotron_instruction("prompt", None, taxonomy_mode="off")
         target = output_payload("unsafe", None, [N23[0]], "off")
