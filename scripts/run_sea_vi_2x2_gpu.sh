@@ -154,6 +154,22 @@ run_stage2_model() {
   run_matrix "$name" "$merged"
 }
 
+run_stage2_nothink_model() {
+  local name="$1"
+  local preferred_adapter="$2"
+  local fallback_adapter="$3"
+  local merged="$4"
+  local adapter
+  if [[ "$MODE_FILTER" == "think" ]]; then
+    echo "[$(date -Is)] SKIP model=$name: VI-only models were requested for no-think only"
+    return 0
+  fi
+  adapter="$(select_adapter "$preferred_adapter" "$fallback_adapter")"
+  ensure_merged "$adapter" "$merged"
+  run_cell "$name" "$merged" on no_think
+  run_cell "$name" "$merged" off no_think
+}
+
 echo "[$(date -Is)] GPU $GPU queue starting; modes=$MODE_FILTER max_new_tokens=$MAX_NEW_TOKENS"
 
 case "$GPU" in
@@ -179,6 +195,11 @@ case "$GPU" in
       "$ROOT/runs-stage2/qwen3_8b/ablation_reasoning_only_1epoch/final" \
       "$ROOT/runs-stage2/qwen3_8b/ablation_reasoning_only_5epoch/checkpoint-1109" \
       "$ROOT/runs-stage2/qwen3_8b/ablation_reasoning_only_5epoch/merged_epoch1"
+    run_stage2_nothink_model \
+      vi_1e \
+      "$ROOT/runs-stage2/qwen3_8b/ablation_vi_gemini_1epoch/final" \
+      "$ROOT/runs-stage2/qwen3_8b/ablation_vi_gemini_5epoch/checkpoint-1583" \
+      "$ROOT/runs-stage2/qwen3_8b/ablation_vi_gemini_5epoch/merged_epoch1"
     ;;
   3)
     run_stage2_model \
@@ -186,6 +207,11 @@ case "$GPU" in
       "$ROOT/runs-stage2/qwen3_8b/ablation_reasoning_only_5epoch/final" \
       "$ROOT/runs-stage2/qwen3_8b/ablation_reasoning_only_5epoch/checkpoint-5545" \
       "$ROOT/runs-stage2/qwen3_8b/ablation_reasoning_only_5epoch/merged"
+    run_stage2_nothink_model \
+      vi_5e \
+      "$ROOT/runs-stage2/qwen3_8b/ablation_vi_gemini_5epoch/final" \
+      "$ROOT/runs-stage2/qwen3_8b/ablation_vi_gemini_5epoch/checkpoint-7915" \
+      "$ROOT/runs-stage2/qwen3_8b/ablation_vi_gemini_5epoch/merged"
     ;;
 esac
 
