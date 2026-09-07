@@ -83,6 +83,9 @@ run_cell() {
     thinking_tag="nothink"
   fi
   local tag="tax_${taxonomy_mode}_${thinking_tag}"
+  if [[ -n "${SEA_SAMPLE:-}" ]]; then
+    tag="${tag}_sample${SEA_SAMPLE}"
+  fi
   local output="$OUTPUT_ROOT/$name/$tag"
   local log="$LOG_ROOT/${name}_${tag}.log"
 
