@@ -44,16 +44,38 @@ BENCHMARK_ARGS=(
   --benchmark "xsafety=$ROOT/work/benchmarks/xsafety_multilingual.jsonl"
 )
 
+BENCHMARK_COUNTS=(
+  "$ROOT/work/benchmarks/cultureguard_jb_9lang.jsonl" 13266
+  "$ROOT/work/benchmarks/cultureguard_standard_9lang.jsonl" 24993
+  "$ROOT/work/benchmarks/multijail_4lang.jsonl" 1260
+  "$ROOT/work/benchmarks/polyguard_prompts_9lang.jsonl" 30906
+  "$ROOT/work/benchmarks/sea_safeguard_vi.jsonl" 1840
+  "$ROOT/work/benchmarks/xsafety_multilingual.jsonl" 19600
+)
+
 require_file() {
   test -f "$1" || { echo "Missing required file: $1" >&2; exit 1; }
 }
 
 require_benchmarks() {
-  local spec path
+  local spec path expected actual
   for ((index=1; index<${#BENCHMARK_ARGS[@]}; index+=2)); do
     spec="${BENCHMARK_ARGS[$index]}"
     path="${spec#*=}"
     require_file "$path"
+  done
+  # Counts are part of the established evaluation contract.  Hashes can differ
+  # after harmless JSONL serialization, but a row-count mismatch means this is
+  # not the benchmark suite used by the baseline and must fail before GPU work.
+  for ((index=0; index<${#BENCHMARK_COUNTS[@]}; index+=2)); do
+    path="${BENCHMARK_COUNTS[$index]}"
+    expected="${BENCHMARK_COUNTS[$((index + 1))]}"
+    actual="$(wc -l < "$path")"
+    actual="${actual//[!0-9]/}"
+    if [[ "$actual" != "$expected" ]]; then
+      echo "Benchmark row-count mismatch: $path expected=$expected actual=$actual" >&2
+      exit 1
+    fi
   done
 }
 
@@ -380,6 +402,9 @@ case "$PHASE" in
     eval_all
     ;;
   bundle-all)
+    # Company bundle mode must not spend hours training only to discover that
+    # the full evaluation suite was never copied into the fresh checkout.
+    require_benchmarks
     install_bundle_data
     smoke_all_training
     train_all
