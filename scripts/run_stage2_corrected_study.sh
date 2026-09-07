@@ -28,9 +28,9 @@ LOG_ROOT="${STAGE2_LOG_ROOT:-$ROOT/logs/stage2-corrected}"
 mkdir -p "$LOG_ROOT" "$MERGED_ROOT" "$EVAL_ROOT" "$EVAL_SMOKE_ROOT"
 
 case "$PHASE" in
-  all|bundle-all|install|data|smoke|train|eval|--eval-worker) ;;
+  all|bundle-all|install|preflight|data|smoke|train|eval|--eval-worker) ;;
   *)
-    echo "Usage: bash scripts/run_stage2_corrected_study.sh [all|bundle-all|install|data|smoke|train|eval]" >&2
+    echo "Usage: bash scripts/run_stage2_corrected_study.sh [all|bundle-all|install|preflight|data|smoke|train|eval]" >&2
     exit 2
     ;;
 esac
@@ -174,6 +174,16 @@ require_four_free_gpus() {
       fi
     done < <(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits)
   fi
+}
+
+preflight_ready() {
+  require_benchmarks
+  dataset_ready "$DATA_VI"
+  dataset_ready "$DATA_REASONING"
+  dataset_ready "$DATA_FULL"
+  require_four_free_gpus
+  "$PYTHON_BIN" -c 'import accelerate,datasets,peft,torch,transformers,vllm,yaml; print("Python training/eval imports: OK")'
+  echo "[$(date -Is)] PREFLIGHT PASSED"
 }
 
 run_gpu_smoke() {
@@ -397,6 +407,7 @@ fi
 case "$PHASE" in
   all)
     build_all_data
+    preflight_ready
     smoke_all_training
     train_all
     eval_all
@@ -406,11 +417,13 @@ case "$PHASE" in
     # the full evaluation suite was never copied into the fresh checkout.
     require_benchmarks
     install_bundle_data
+    preflight_ready
     smoke_all_training
     train_all
     eval_all
     ;;
   install) install_bundle_data ;;
+  preflight) preflight_ready ;;
   data) build_all_data ;;
   smoke) smoke_all_training ;;
   train) train_all ;;

@@ -188,6 +188,7 @@ Có thể chạy lại theo phase mà không nhầm artifact dở là hoàn thà
 ```bash
 bash scripts/run_stage2_corrected_study.sh data
 bash scripts/run_stage2_corrected_study.sh install
+bash scripts/run_stage2_corrected_study.sh preflight
 bash scripts/run_stage2_corrected_study.sh smoke
 bash scripts/run_stage2_corrected_study.sh train
 bash scripts/run_stage2_corrected_study.sh eval
