@@ -402,6 +402,9 @@ eval_all() {
   "$PYTHON_BIN" scripts/summarize_stage2_study.py \
     --eval-root "$EVAL_ROOT" \
     --output-prefix "$ROOT/runs-stage2/qwen3_8b/corrected_study/results"
+  "$PYTHON_BIN" scripts/summarize_stage2_behavior.py \
+    --eval-root "$EVAL_ROOT" \
+    --output-prefix "$ROOT/runs-stage2/qwen3_8b/corrected_study/behavior"
 }
 
 if [[ "$PHASE" == "--eval-worker" ]]; then

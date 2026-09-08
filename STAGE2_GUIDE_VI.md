@@ -197,3 +197,10 @@ bash scripts/run_stage2_corrected_study.sh eval
 Kết quả tổng hợp cùng định nghĩa Bảng 2 được ghi thành một bảng duy nhất tại
 `runs-stage2/qwen3_8b/corrected_study/results.md` và `.csv/.json`. Script chỉ
 skip một eval khi đồng thời có `metrics.json` và `progress.status=complete`.
+
+Bảng hành vi chi tiết được ghi tại `corrected_study/behavior.md` và
+`.csv/.json`. Bảng này đọc trực tiếp từng prediction, tách P/PR và báo N,
+accuracy tổng, accuracy-safe (specificity), accuracy-unsafe (harmful recall),
+balanced accuracy, macro-F1, FP/FN, tỷ lệ dự đoán unsafe và parse rate.
+XSafety/MultiJail có `Safe-N=0`, nên accuracy bằng unsafe-recall và không thể
+dùng riêng hai tập này để kết luận model có over-flag safe hay không.
