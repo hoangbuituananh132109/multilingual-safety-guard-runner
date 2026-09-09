@@ -53,6 +53,25 @@ python3 source_study.py build --source sea_cultural_vi \
 Builder WildGuard nhận cả JSONL chuẩn và parquet gốc. Không đẩy SEA Cultural-v3
 công khai khi upstream chưa công bố license.
 
+Nếu chuyển file nội bộ, ba archive đã tạo trên máy chuẩn bị là:
+
+| Archive | SHA-256 | Trạng thái |
+| --- | --- | --- |
+| `nemotron_v3_9lang_80k_v1.zip` | `68624e52d632f0a98fe6df31896113571365383ddf7fa99b16f44803ae14168a` | Public HF |
+| `wildguardtrain_en_80k_v1.gated.zip` | `a5c8fa494f4f331f2b4cea613117e060aeebf366e8f81492fec9fbc28cc93645` | Chỉ chuyển nội bộ sau khi được cấp quyền |
+| `sea_cultural_vi_80k_v1.gated.zip` | `031eb97e74f4e8a9b2149e94ae42ee7fba8e5f920e5aebf4dde167bfd09b35ad` | Chỉ chuyển nội bộ; không public |
+
+Cài hai archive còn lại tương tự bằng `scripts/source_study_bundle.py install`.
+Ba benchmark bổ sung có thể chuyển bằng `source_study_benchmarks_v1.gated.zip`
+(SHA-256 `101355a773781f9d63f61740809f88336a7b8f69eb50758be697b5bb1d024555`)
+và cài an toàn vào thư mục benchmark đang có:
+
+```bash
+python3 scripts/source_study_benchmark_bundle.py install \
+  --zip source_study_benchmarks_v1.gated.zip \
+  --output work/benchmarks
+```
+
 ## Chạy an toàn trên 4 A30
 
 Chạy từng cổng kiểm tra trước:
