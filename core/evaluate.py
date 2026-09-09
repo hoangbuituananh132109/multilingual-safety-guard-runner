@@ -363,6 +363,7 @@ def main() -> None:
         load_start = time.time()
         vllm_llm = LLM(
             model=args.base_model,
+            revision=args.revision,
             dtype="bfloat16",
             enforce_eager=True,
             tensor_parallel_size=args.tensor_parallel_size,

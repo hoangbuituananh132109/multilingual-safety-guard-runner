@@ -1,0 +1,32 @@
+run_name: qwen3-4b-source-study-sea-cultural-vi-80k-1epoch
+model:
+  id: Qwen/Qwen3-4B
+  revision: 1cfa9a7208912126459214e8b04321603b3df60c
+  family: nemotron
+  tuning: lora
+  attention: sdpa
+  lora_r: 8
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, v_proj]
+data:
+  train: work/source-study/sea_cultural_vi/train.jsonl
+  validation: work/source-study/sea_cultural_vi/validation.jsonl
+  max_length: 2048
+training:
+  epochs: 1
+  learning_rate: 1.0e-05
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 8
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_strategy: epoch
+  eval_strategy: epoch
+  save_steps: 2500
+  eval_steps: 2500
+  save_total_limit: 2
+  seed: 3407
+output_dir: runs-source-study/qwen3_4b/sea_cultural_vi_80k_1epoch
+

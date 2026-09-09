@@ -45,18 +45,18 @@ def get_offload_dir():
     return str(Path(tempfile.gettempdir()) / "offload_qwen35")
 
 
-def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa"):
+def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa", revision: str = "main"):
     """Try Qwen3.5 multimodal first, fallback to CausalLM."""
     # On CPU-only machines, force CPU to avoid meta-offload dispatch issues with PEFT
     if not torch.cuda.is_available():
         log("no CUDA, forcing device_map=cpu (no offload)")
         try:
-            m = AutoModelForImageTextToText.from_pretrained(base_model, dtype=dtype, device_map="cpu", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
+            m = AutoModelForImageTextToText.from_pretrained(base_model, revision=revision, dtype=dtype, device_map="cpu", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
             log(f"loaded via AutoModelForImageTextToText ({type(m).__name__}) on CPU")
             return m
         except Exception as e:
             log(f"ImageTextToText CPU load failed ({e}), trying CausalLM cpu...")
-        m = AutoModelForCausalLM.from_pretrained(base_model, dtype=dtype, device_map="cpu", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
+        m = AutoModelForCausalLM.from_pretrained(base_model, revision=revision, dtype=dtype, device_map="cpu", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True)
         log(f"loaded via AutoModelForCausalLM ({type(m).__name__}) on CPU")
         return m
 
@@ -64,12 +64,12 @@ def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa"):
     offload_dir = get_offload_dir()
     Path(offload_dir).mkdir(parents=True, exist_ok=True)
     try:
-        m = AutoModelForImageTextToText.from_pretrained(base_model, dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True, offload_folder=offload_dir, offload_state_dict=True)
+        m = AutoModelForImageTextToText.from_pretrained(base_model, revision=revision, dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True, offload_folder=offload_dir, offload_state_dict=True)
         log(f"loaded via AutoModelForImageTextToText ({type(m).__name__})")
         return m
     except Exception as e:
         log(f"ImageTextToText load failed ({e}), trying CausalLM...")
-    m = AutoModelForCausalLM.from_pretrained(base_model, dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True, offload_folder=offload_dir, offload_state_dict=True)
+    m = AutoModelForCausalLM.from_pretrained(base_model, revision=revision, dtype=dtype, device_map="auto", attn_implementation=attn_impl, trust_remote_code=True, low_cpu_mem_usage=True, offload_folder=offload_dir, offload_state_dict=True)
     log(f"loaded via AutoModelForCausalLM ({type(m).__name__})")
     return m
 
@@ -77,6 +77,7 @@ def load_base_model(base_model: str, dtype, attn_impl: str = "sdpa"):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-model", required=True)
+    parser.add_argument("--revision", default="main", help="Pinned Hugging Face base-model revision")
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
@@ -87,7 +88,7 @@ def main() -> None:
     dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[args.dtype]
     log(f"loading base model from {args.base_model} (dtype={args.dtype}, attn={args.attn})...")
     start = time.time()
-    model = load_base_model(args.base_model, dtype, args.attn)
+    model = load_base_model(args.base_model, dtype, args.attn, args.revision)
     log(f"base model loaded in {time.time()-start:.1f}s")
 
     log(f"loading LoRA adapter from {args.adapter}...")
@@ -129,9 +130,10 @@ def main() -> None:
     merged.save_pretrained(args.output, safe_serialization=True)
     tok_src = args.adapter / "tokenizer" if (args.adapter / "tokenizer").exists() else (args.adapter if (args.adapter / "tokenizer.json").exists() else args.base_model)
     try:
-        tokenizer = AutoTokenizer.from_pretrained(tok_src, trust_remote_code=True)
+        tokenizer_kwargs = {"revision": args.revision} if tok_src == args.base_model else {}
+        tokenizer = AutoTokenizer.from_pretrained(tok_src, trust_remote_code=True, **tokenizer_kwargs)
     except Exception:
-        tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(args.base_model, revision=args.revision, trust_remote_code=True)
     tokenizer.save_pretrained(args.output)
     # copy processor/vocab extras for Qwen3.5 multimodal (needed for vLLM)
     try:
@@ -149,6 +151,7 @@ def main() -> None:
     log(f"saved in {time.time()-start:.1f}s")
     manifest = {
         "base_model": args.base_model,
+        "base_model_revision": args.revision,
         "adapter": str(args.adapter),
         "adapter_sha256": args.adapter_sha256,
         "dtype": args.dtype,

@@ -1,0 +1,48 @@
+study:
+  name: qwen3_4b_data_source_screen_80k
+  seed: 3407
+  train_examples_per_arm: 80000
+  validation_examples_per_arm: 1000
+  taxonomy_mode: off
+  thinking_mode: no_think
+  sampling: stable_random_within_matched_view_and_binary_label_cells
+  train_cells:
+    P_safe: 21501
+    P_unsafe: 23102
+    PR_safe: 27594
+    PR_unsafe: 7803
+  validation_cells:
+    P_safe: 269
+    P_unsafe: 289
+    PR_safe: 345
+    PR_unsafe: 97
+
+model:
+  id: Qwen/Qwen3-4B
+  revision: 1cfa9a7208912126459214e8b04321603b3df60c
+  family: nemotron
+  tuning: lora
+  attention: sdpa
+  lora_r: 8
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, v_proj]
+
+training:
+  epochs: 1
+  learning_rate: 1.0e-05
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 8
+  effective_global_batch_4gpu: 32
+  max_length: 2048
+  lr_scheduler_type: constant
+  warmup_ratio: 0.0
+  gradient_checkpointing: true
+  logging_steps: 10
+  save_strategy: epoch
+  eval_strategy: epoch
+  save_steps: 2500
+  eval_steps: 2500
+  save_total_limit: 2
+  seed: 3407
+
