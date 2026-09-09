@@ -82,19 +82,20 @@ bash scripts/run_source_study.sh smoke
 ```
 
 Smoke GPU của mỗi arm chỉ chạy đúng 2 optimizer steps và không ghi checkpoint.
-Khi cả ba smoke pass, chạy toàn bộ có log và tiếp tục sống sau khi ngắt SSH:
+Khi cả ba smoke pass, chạy train + merge + eval có log và tiếp tục sống sau khi
+ngắt SSH:
 
 ```bash
 mkdir -p logs/source-study
-nohup bash scripts/run_source_study.sh all \
+nohup bash scripts/run_source_study.sh study \
   > logs/source-study/orchestrator.log 2>&1 &
 echo $! > logs/source-study/orchestrator.pid
 tail -f logs/source-study/orchestrator.log
 ```
 
-`all` có skip/resume: preflight, smoke, train tuần tự ba arm trên cả bốn A30,
-merge, rồi eval đồng thời base + ba model (mỗi model một GPU). Đánh giá luôn dùng
-taxonomy off/no-think để chỉ thay đổi nguồn data.
+`study` có skip/resume: train tuần tự ba arm trên cả bốn A30, merge, rồi eval
+đồng thời base + ba model (mỗi model một GPU). `all` chạy thêm preflight và smoke
+từ đầu. Đánh giá luôn dùng taxonomy off/no-think để chỉ thay đổi nguồn data.
 
 Muốn smoke eval trước khi chạy full benchmark:
 

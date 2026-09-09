@@ -198,13 +198,14 @@ eval_all() {
 if [[ "$PHASE" == "--eval-worker" ]]; then eval_worker "${2:?missing GPU}"; exit 0; fi
 case "$PHASE" in
   all) preflight; gpu_smoke; train_all; merge_all; eval_all ;;
+  study) train_all; merge_all; eval_all ;;
   preflight) preflight ;;
   smoke) gpu_smoke ;;
   train) train_all ;;
   merge) merge_all ;;
   eval-smoke) SOURCE_STUDY_EVAL_SAMPLE="${SOURCE_STUDY_EVAL_SAMPLE:-8}" eval_all ;;
   eval) eval_all ;;
-  *) die "usage: bash scripts/run_source_study.sh [all|preflight|smoke|train|merge|eval-smoke|eval]" ;;
+  *) die "usage: bash scripts/run_source_study.sh [all|study|preflight|smoke|train|merge|eval-smoke|eval]" ;;
 esac
 
 echo "[$(date -Is)] SOURCE STUDY COMPLETE phase=$PHASE"
