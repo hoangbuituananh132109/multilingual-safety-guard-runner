@@ -52,14 +52,21 @@ def install(archive_path: Path, output: Path) -> dict:
         members = {item["name"]: item for item in bundle["members"]}
         if set(members) != set(EXPECTED) | {MANIFEST}:
             raise ValueError("Unexpected benchmark bundle members")
-        output.mkdir(parents=True, exist_ok=True)
+        payloads = {}
         for name, item in members.items():
             value = archive.read(name)
             if len(value) != item["bytes"] or sha256_bytes(value) != item["sha256"]:
                 raise ValueError(f"Hash mismatch in archive: {name}")
+            payloads[name] = value
+        output.mkdir(parents=True, exist_ok=True)
+        # Validate immutable benchmark payloads before writing anything. The
+        # generated suite manifest may be replaced when upgrading v1 -> v2.
+        for name, value in payloads.items():
             target = output / name
-            if target.exists() and target.read_bytes() != value:
+            if name != MANIFEST and target.exists() and target.read_bytes() != value:
                 raise FileExistsError(f"Refusing to overwrite different benchmark: {target}")
+        for name, value in payloads.items():
+            target = output / name
             target.write_bytes(value)
     return {"status": "installed", "output": str(output), "benchmarks": EXPECTED}
 
