@@ -41,8 +41,9 @@ BENCHMARK_ARGS=(
   --benchmark "wildguardtest_en=$ROOT/work/benchmarks/wildguardtest_en.jsonl"
   --benchmark "sealsbench_vi=$ROOT/work/benchmarks/sealsbench_vi.jsonl"
   --benchmark "linguasafe_vi=$ROOT/work/benchmarks/linguasafe_vi.jsonl"
+  --benchmark "visafe_vi=$ROOT/work/benchmarks/visafe_vi.jsonl"
 )
-BENCHMARK_COUNTS=(13266 24993 1260 30906 1840 19600 450 3408 26644 3884)
+BENCHMARK_COUNTS=(13266 24993 1260 30906 1840 19600 450 3408 26644 3884 3212)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 require_file() { [[ -f "$1" ]] || die "missing file: $1"; }

@@ -74,6 +74,16 @@ python3 scripts/source_study_benchmark_bundle.py install \
   --output work/benchmarks
 ```
 
+VISafe dùng NVIDIA Sample Data License cấm phân phối lại, nên không nằm trong
+bundle trên. Sau khi đã cài đủ ba arm train, tải trực tiếp từ NVIDIA và tạo
+binary guard view bằng:
+
+```bash
+python3 core/prepare_visafe_benchmark.py \
+  --source-study-root work/source-study \
+  --output-dir work/benchmarks
+```
+
 ## Chạy an toàn trên 4 A30
 
 Chạy từng cổng kiểm tra trước:
@@ -130,6 +140,13 @@ PolyGuard, XSafety và SEA-VI. Bổ sung:
   Phần indirect generation/over-refusal vẫn nằm ngoài track classifier này.
   Upstream có một prompt VI giống hệt xuất hiện ba lần với nhãn L0/L2 xung đột;
   giữ nguyên để trung thành với bản benchmark NVIDIA đã dùng.
+- NVIDIA VISafe (3.212 prompt tiếng Việt): bộ probe chính xác dành cho
+  evaluation/red-team, không đưa vào bất kỳ arm train nào. Guard view ánh xạ
+  `refuse/warn_and_refuse=unsafe`, `allow/neutral_response=safe`. Báo cáo cả
+  `visafe_vi` đầy đủ để đối chiếu nội bộ và `visafe_vi_clean` gồm 3.164 mẫu;
+  clean slice loại 48 hàng có prompt VI hoặc prompt EN trùng chính xác với ít
+  nhất một arm train. Protocol chính thức sinh response + LLM judge vẫn tách
+  khỏi phép đo input-classifier này.
 
 Sau eval, bảng gọn nằm ở
 `runs-source-study/qwen3_4b/source_study_results.md` với balanced accuracy,

@@ -23,12 +23,23 @@ def main() -> None:
             continue
         metrics = json.loads(path.read_text(encoding="utf-8"))
         for metric in metrics:
-            if metric.get("language") != "ALL" or metric.get("view") != "ALL" or metric.get("subset") != "ALL":
+            overall = (
+                metric.get("language") == "ALL"
+                and metric.get("view") == "ALL"
+                and metric.get("subset") == "ALL"
+            )
+            visafe_clean = (
+                metric.get("benchmark") == "visafe_vi"
+                and metric.get("language") == "vi"
+                and metric.get("view") == "P"
+                and metric.get("subset") == "clean"
+            )
+            if not (overall or visafe_clean):
                 continue
             rows.append(
                 {
                     "model": path.parent.name,
-                    "benchmark": str(metric["benchmark"]),
+                    "benchmark": "visafe_vi_clean" if visafe_clean else str(metric["benchmark"]),
                     "n": str(metric["examples"]),
                     "balanced_acc": percent(metric.get("balanced_accuracy")),
                     "macro_f1": percent(metric.get("macro_f1")),
