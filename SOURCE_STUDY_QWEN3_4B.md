@@ -62,13 +62,15 @@ Nếu chuyển file nội bộ, ba archive đã tạo trên máy chuẩn bị l�
 | `sea_cultural_vi_80k_v1.gated.zip` | `031eb97e74f4e8a9b2149e94ae42ee7fba8e5f920e5aebf4dde167bfd09b35ad` | Chỉ chuyển nội bộ; không public |
 
 Cài hai archive còn lại tương tự bằng `scripts/source_study_bundle.py install`.
-Ba benchmark bổ sung có thể chuyển bằng `source_study_benchmarks_v1.gated.zip`
-(SHA-256 `101355a773781f9d63f61740809f88336a7b8f69eb50758be697b5bb1d024555`)
+Bốn benchmark bổ sung có thể chuyển bằng `source_study_benchmarks_v2.gated.zip`
+(SHA-256 `a4c47e11b4c241167a31a1b71e04bdc9a1612b5e5d2ddfe34fa2effe6bad667c`)
 và cài an toàn vào thư mục benchmark đang có:
 
 ```bash
+wget -O source_study_benchmarks_v2.gated.zip \
+  https://huggingface.co/datasets/TuanAnhHoangBui/qwen3-4b-source-study-nemotron-v3-80k/resolve/main/source_study_benchmarks_v2.gated.zip
 python3 scripts/source_study_benchmark_bundle.py install \
-  --zip source_study_benchmarks_v1.gated.zip \
+  --zip source_study_benchmarks_v2.gated.zip \
   --output work/benchmarks
 ```
 
@@ -120,6 +122,14 @@ PolyGuard, XSafety và SEA-VI. Bổ sung:
 - WildGuardTest (3.408 tác vụ P/PR): test tiếng Anh có nhãn người.
 - SEALSBench-VI (26.644 prompt): kiểm độ bền tiếng Việt dịch máy; đây chỉ là
   diagnostic phụ, không thay SEA-VI vốn có ngữ cảnh văn hóa bản địa.
+- LinguaSafe-VI (3.884 prompt): benchmark đa ngôn ngữ được NVIDIA dùng trong
+  đánh giá Nemotron 3.5 Content Safety. Binary view dùng `L0=safe`,
+  `L1/L2/L3=unsafe`; severity gốc vẫn nằm trong metadata. `macro-F1` của runner
+  cho phép so cùng các guard benchmark; `linguasafe_severity_weighted_f1` và
+  `linguasafe_severity_weighted_fpr` dùng đúng trọng số paper với alpha=0,6.
+  Phần indirect generation/over-refusal vẫn nằm ngoài track classifier này.
+  Upstream có một prompt VI giống hệt xuất hiện ba lần với nhãn L0/L2 xung đột;
+  giữ nguyên để trung thành với bản benchmark NVIDIA đã dùng.
 
 Sau eval, bảng gọn nằm ở
 `runs-source-study/qwen3_4b/source_study_results.md` với balanced accuracy,

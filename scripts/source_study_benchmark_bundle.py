@@ -1,4 +1,4 @@
-"""Create/install the three extra source-study benchmarks with hash checks."""
+"""Create/install the four extra source-study benchmarks with hash checks."""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ EXPECTED = {
     "xstest_en.jsonl": 450,
     "wildguardtest_en.jsonl": 3_408,
     "sealsbench_vi.jsonl": 26_644,
+    "linguasafe_vi.jsonl": 3_884,
 }
 MANIFEST = "source_study_benchmark_manifest.json"
 
@@ -35,7 +36,7 @@ def create(source: Path, output: Path) -> dict:
                 raise ValueError(f"{name}: expected {EXPECTED[name]} rows, got {nonempty_lines(value)}")
             archive.writestr(name, value)
             members.append({"name": name, "bytes": len(value), "sha256": sha256_bytes(value)})
-        bundle = {"schema_version": 1, "members": members, "expected_rows": EXPECTED}
+        bundle = {"schema_version": 2, "members": members, "expected_rows": EXPECTED}
         archive.writestr("bundle_manifest.json", json.dumps(bundle, ensure_ascii=False, indent=2) + "\n")
     result = {**bundle, "archive": str(output), "archive_bytes": output.stat().st_size}
     result["archive_sha256"] = sha256_bytes(output.read_bytes())
@@ -68,7 +69,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     pack = sub.add_parser("create")
     pack.add_argument("--source", type=Path, default=Path("work/benchmarks"))
-    pack.add_argument("--output", type=Path, default=Path("zip/source-study/source_study_benchmarks_v1.gated.zip"))
+    pack.add_argument("--output", type=Path, default=Path("zip/source-study/source_study_benchmarks_v2.gated.zip"))
     unpack = sub.add_parser("install")
     unpack.add_argument("--zip", type=Path, required=True)
     unpack.add_argument("--output", type=Path, default=Path("work/benchmarks"))

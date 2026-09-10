@@ -17,6 +17,7 @@ from huggingface_hub import get_token, hf_hub_download
 XSTEST_REVISION = "d7bb5bd738c1fcbc36edd83d5e7d1b71a3e2d84d"
 WILDGUARD_REVISION = "d29c47f41c8b51348b5c8e8c81c039b3132b66d1"
 SEALSBENCH_REVISION = "fc8125c1360f4aa407ef139bffaeaac5275137e8"
+LINGUASAFE_REVISION = "7cb0bc217efd98293ff715294606522a8625321d"
 XSTEST_URL = (
     "https://raw.githubusercontent.com/paul-rottger/xstest/"
     f"{XSTEST_REVISION}/xstest_prompts.csv"
@@ -178,6 +179,48 @@ def sealsbench_vi_rows(path: Path) -> Iterable[dict[str, Any]]:
         }
 
 
+def linguasafe_vi_rows(path: Path) -> Iterable[dict[str, Any]]:
+    """Adapt the Vietnamese LinguaSafe slice to the binary guard schema.
+
+    LinguaSafe severity L0 is benign. L1-L3 are increasingly unsafe. The
+    original level remains in metadata so severity-aware evaluation can be
+    added without rebuilding the benchmark.
+    """
+    table = pq.read_table(path)
+    for index, row in enumerate(table.to_pylist()):
+        if str(row.get("lang") or "").casefold() != "vi":
+            continue
+        prompt = str(row.get("prompt") or "").strip()
+        level = row.get("level")
+        if not prompt or level not in {0, 1, 2, 3}:
+            continue
+        source = row.get("source")
+        yield {
+            "example_id": f"linguasafe:{index}:P:vi",
+            "source_id": str(row.get("id") if row.get("id") is not None else index),
+            "source_split": "train",
+            "dataset_source": "zhiyuan-ning/linguasafe",
+            "language": "vi",
+            "view": "P",
+            "subset": str(row.get("type") or "ALL"),
+            "topic": row.get("subtype"),
+            "text": f"Prompt: {prompt}",
+            "prompt": prompt,
+            "response": None,
+            "safety_label": "safe" if level == 0 else "unsafe",
+            "prompt_safety_label": "safe" if level == 0 else "unsafe",
+            "categories": [],
+            "category_scope": "prompt",
+            "metadata": {
+                "severity_level": level,
+                "language_specific": row.get("specific"),
+                "type_raw": row.get("type"),
+                "subtype_raw": row.get("subtype"),
+                "source": source,
+            },
+        }
+
+
 def download_xstest(cache_dir: Path) -> Path:
     path = cache_dir / f"xstest-{XSTEST_REVISION}.csv"
     if not path.is_file():
@@ -204,7 +247,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare extra source-study guard benchmarks.")
     parser.add_argument("--output-dir", type=Path, default=Path("work/benchmarks"))
     parser.add_argument("--cache-dir", type=Path, default=Path("input/source-study/benchmarks"))
-    parser.add_argument("--skip-wildguard", action="store_true", help="Prepare only ungated XSTest and SEALSBench-VI.")
+    parser.add_argument(
+        "--skip-wildguard",
+        action="store_true",
+        help="Prepare only ungated XSTest, SEALSBench-VI, and LinguaSafe-VI.",
+    )
     args = parser.parse_args()
     token = os.environ.get("HF_TOKEN") or get_token()
 
@@ -215,16 +262,24 @@ def main() -> None:
         SEALSBENCH_REVISION,
         token=None,
     )
+    linguasafe = hf_file(
+        "zhiyuan-ning/linguasafe",
+        "data/train-00000-of-00001.parquet",
+        LINGUASAFE_REVISION,
+        token=None,
+    )
     manifest: dict[str, Any] = {
-        "suite": "source_study_extra_benchmarks_v1",
+        "suite": "source_study_extra_benchmarks_v2",
         "sources": {
             "paul-rottger/xstest": XSTEST_REVISION,
             "MickyMike/SEALSBench": SEALSBENCH_REVISION,
+            "zhiyuan-ning/linguasafe": LINGUASAFE_REVISION,
         },
         "notes": {
             "xstest": "English over-refusal/hard-negative diagnostic; 250 safe and 200 unsafe contrast prompts.",
             "sealsbench_vi": "Vietnamese machine-translated robustness diagnostic from the SEALGuard replication package; not a culturally native replacement for SEA-SafeguardBench.",
             "wildguardtest": "Human-annotated English prompt and response harm test; kept disjoint from WildGuardTrain.",
+            "linguasafe_vi": "Vietnamese LinguaSafe prompt slice used by NVIDIA for multilingual guard evaluation. Binary mapping is L0=safe and L1-L3=unsafe; original L0-L3 severity and language-specific flags are preserved for the official alpha=0.6 severity-weighted F1/FPR. The upstream VI slice contains one exact prompt with conflicting L0/L2 labels (three rows); it is retained for upstream fidelity.",
         },
         "benchmarks": {},
     }
@@ -232,6 +287,10 @@ def main() -> None:
     manifest["benchmarks"]["sealsbench_vi"] = write_jsonl(
         args.output_dir / "sealsbench_vi.jsonl",
         sealsbench_vi_rows(seals),
+    )
+    manifest["benchmarks"]["linguasafe_vi"] = write_jsonl(
+        args.output_dir / "linguasafe_vi.jsonl",
+        linguasafe_vi_rows(linguasafe),
     )
 
     if not args.skip_wildguard:
@@ -256,4 +315,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

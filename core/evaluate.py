@@ -18,6 +18,7 @@ def log(message: str) -> None:
 
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 
+from linguasafe_metrics import linguasafe_severity_stats
 from prompt import N23, NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE, NEMOTRON_PROMPT_TEMPLATE, render_prompt
 
 
@@ -119,6 +120,7 @@ def stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
     valid_y = [1 if row["gold"] == "unsafe" else 0 for row in valid]
     valid_p = [1 if row["prediction"] == "unsafe" else 0 for row in valid]
     valid_has_both = len(set(valid_y)) == 2
+    severity = linguasafe_severity_stats(rows)
     return {
         "examples": len(rows), "parsed": len(valid), "parse_errors": len(rows) - len(valid),
         "parse_rate": len(valid) / len(rows) if rows else None,
@@ -134,6 +136,7 @@ def stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "parsed_only_balanced_accuracy": balanced_accuracy_score(valid_y, valid_p) if valid_y and valid_has_both else None,
         "parsed_only_macro_f1": f1_score(valid_y, valid_p, average="macro", zero_division=0) if valid_y and valid_has_both else None,
         "parsed_only_unsafe_f1": f1_score(valid_y, valid_p, pos_label=1, average="binary", zero_division=0) if valid_y else None,
+        **severity,
         "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn),
     }
 
@@ -326,6 +329,7 @@ def main() -> None:
                     "gold_categories": list(row.get("categories") or []),
                     "predicted_categories": parsed["categories"],
                     "unknown_categories": parsed["unknown_categories"],
+                    "severity_level": (row.get("metadata") or {}).get("severity_level"),
                     "raw_output": raw,
                 })
             write_progress(
@@ -422,6 +426,7 @@ def main() -> None:
                         "gold_categories": list(row.get("categories") or []),
                         "predicted_categories": parsed["categories"],
                         "unknown_categories": parsed["unknown_categories"],
+                        "severity_level": (row.get("metadata") or {}).get("severity_level"),
                         "raw_output": raw,
                     })
                 total_completed += len(chunk_rows)
