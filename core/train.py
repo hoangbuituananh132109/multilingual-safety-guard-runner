@@ -164,6 +164,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, help="Override config output_dir (useful for isolated smoke runs)")
+    parser.add_argument("--train-data", type=Path, help="Override data.train (used by small, prebuilt smoke datasets)")
+    parser.add_argument("--validation-data", type=Path, help="Override data.validation together with --train-data")
     parser.add_argument("--resume", nargs="?", const="auto")
     parser.add_argument("--max-steps", type=int, default=-1)
     parser.add_argument("--skip-eval", action="store_true", help="Do not run eval during training")
@@ -181,6 +183,11 @@ def main() -> None:
         model_cfg["tokenizer_id"] = os.path.expandvars(str(model_cfg["tokenizer_id"]))
     data_cfg["train"] = os.path.expandvars(str(data_cfg["train"]))
     data_cfg["validation"] = os.path.expandvars(str(data_cfg["validation"]))
+    if (args.train_data is None) != (args.validation_data is None):
+        raise ValueError("--train-data and --validation-data must be provided together")
+    if args.train_data is not None:
+        data_cfg["train"] = str(args.train_data)
+        data_cfg["validation"] = str(args.validation_data)
     cfg["output_dir"] = os.path.expandvars(str(args.output_dir if args.output_dir is not None else cfg["output_dir"]))
     if "$" in model_cfg["id"] or "%" in model_cfg["id"]:
         raise EnvironmentError(

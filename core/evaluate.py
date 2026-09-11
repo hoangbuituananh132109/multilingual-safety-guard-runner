@@ -19,7 +19,7 @@ def log(message: str) -> None:
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 
 from linguasafe_metrics import linguasafe_severity_stats
-from prompt import N23, NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE, NEMOTRON_PROMPT_TEMPLATE, render_prompt
+from prompt import N23, NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE, NEMOTRON_PROMPT_TEMPLATE, SEA_GUARD_PROMPT_TEMPLATE, parse_sea_guard_label, render_prompt
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -96,6 +96,24 @@ def parse_output(text: str, family: str, view: str) -> dict[str, Any]:
             return {"prediction": None, "parse_status": "PARSE_ERROR", "payload": None, "categories": [], "unknown_categories": []}
         value = match.group(1).lower()
         return {"prediction": "unsafe" if value in {"unsafe", "controversial"} else "safe", "parse_status": "strict", "payload": {"Safety": value}, "categories": [], "unknown_categories": []}
+    if family == "sea_guard":
+        three_way, prediction, strict = parse_sea_guard_label(text, view)
+        if three_way is None:
+            return {"prediction": None, "parse_status": "PARSE_ERROR", "payload": None, "categories": [], "unknown_categories": []}
+        return {
+            "prediction": prediction,
+            "parse_status": "strict_label" if strict else "repaired_label",
+            "payload": {
+                "three_way_label": three_way,
+                "binary_label": prediction,
+                "sensitive_mapping_applied": three_way == "sensitive",
+                "sensitive_mapping_rule": (
+                    "sensitive_prompt_to_safe" if view == "P" else "sensitive_response_to_unsafe"
+                ) if three_way == "sensitive" else None,
+            },
+            "categories": [],
+            "unknown_categories": [],
+        }
     value, strict = extract_json(text)
     if value is None:
         return {"prediction": None, "parse_status": "PARSE_ERROR", "payload": None, "categories": [], "unknown_categories": []}
@@ -150,7 +168,7 @@ def main() -> None:
     parser.add_argument("--base-model", required=True)
     parser.add_argument("--revision", default="main")
     parser.add_argument("--adapter", type=Path)
-    parser.add_argument("--family", choices=["nemotron", "qwen_binary"], required=True)
+    parser.add_argument("--family", choices=["nemotron", "qwen_binary", "sea_guard"], required=True)
     parser.add_argument("--benchmark", action="append", required=True, help="NAME=/path/file.jsonl")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -159,6 +177,12 @@ def main() -> None:
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--max-input-tokens", type=int, default=8064)
     parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument(
+        "--max-model-len",
+        type=int,
+        default=8192,
+        help="Maximum vLLM sequence length. The 8192 default matches 8064 input + 128 generated tokens and avoids allocating KV cache for a model's much larger native context.",
+    )
     parser.add_argument("--decoding-profile", choices=["greedy", "nemotron_model_card"], default="greedy")
     parser.add_argument(
         "--taxonomy-mode",
@@ -181,6 +205,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.vllm_chunk_size < 1:
         raise ValueError("--vllm-chunk-size must be at least 1")
+    if args.max_model_len < args.max_input_tokens + args.max_new_tokens:
+        raise ValueError(
+            "--max-model-len must be at least --max-input-tokens + --max-new-tokens "
+            f"({args.max_input_tokens + args.max_new_tokens})"
+        )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_progress(
         args.output_dir,
@@ -372,6 +401,7 @@ def main() -> None:
             enforce_eager=True,
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
+            max_model_len=args.max_model_len,
         )
         log(f"vLLM engine loaded in {time.time()-load_start:.1f}s")
         if args.decoding_profile == "nemotron_model_card":
@@ -471,12 +501,17 @@ def main() -> None:
     with (args.output_dir / "metrics.csv").open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(result_rows[0])); writer.writeheader(); writer.writerows(result_rows)
     (args.output_dir / "metrics.json").write_text(json.dumps(result_rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    prompt_template = (
-        NEMOTRON_PROMPT_TEMPLATE
-        if args.taxonomy_mode == "on"
-        else NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE
-    )
-    if args.thinking_mode == "think":
+    if args.family == "sea_guard":
+        prompt_template = SEA_GUARD_PROMPT_TEMPLATE
+    elif args.family == "nemotron":
+        prompt_template = (
+            NEMOTRON_PROMPT_TEMPLATE
+            if args.taxonomy_mode == "on"
+            else NEMOTRON_PROMPT_NO_TAXONOMY_TEMPLATE
+        )
+    else:
+        prompt_template = None
+    if args.family == "nemotron" and args.thinking_mode == "think":
         prompt_template = prompt_template.replace(
             "Do not include anything other than the output JSON in your response.",
             "Think briefly before answering, then provide only the output JSON as the final answer.",
@@ -488,13 +523,14 @@ def main() -> None:
         "adapter": str(args.adapter) if args.adapter else None,
         "family": args.family,
         "backend": args.backend,
+        "max_model_len": args.max_model_len,
         "decoding_profile": args.decoding_profile,
         "taxonomy_mode": args.taxonomy_mode if args.family == "nemotron" else None,
         "thinking_mode": args.thinking_mode if args.family == "nemotron" else None,
         "seed": args.seed,
         "parse_error_policy": args.parse_error_policy,
-        "prompt_template_sha256": hashlib.sha256(prompt_template.encode("utf-8")).hexdigest() if args.family == "nemotron" else None,
-        "protocol_note": "SEA rows evaluated with the configured model-native guard prompt; this is not the official SEA-HELM prompt/leaderboard protocol.",
+        "prompt_template_sha256": hashlib.sha256(prompt_template.encode("utf-8")).hexdigest() if prompt_template else None,
+        "protocol_note": "SEA rows evaluated with the documented three-way training contract; this is not claimed to be an undisclosed official training prompt or the official SEA-HELM leaderboard protocol.",
     }
     (args.output_dir / "run_manifest.json").write_text(json.dumps(run_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_progress(
