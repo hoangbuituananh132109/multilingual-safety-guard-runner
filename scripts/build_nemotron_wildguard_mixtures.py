@@ -15,24 +15,28 @@ SOURCE_DIRS = {
 }
 
 MIXTURES = {
+    "nemotron30_wildguard70": {"nemotron": 24_000, "wildguard": 56_000},
     "nemotron50_wildguard50": {"nemotron": 40_000, "wildguard": 40_000},
     "nemotron70_wildguard30": {"nemotron": 56_000, "wildguard": 24_000},
     "nemotron80_wildguard20": {"nemotron": 64_000, "wildguard": 16_000},
 }
 
 VALIDATION_MIXTURES = {
+    "nemotron30_wildguard70": {"nemotron": 300, "wildguard": 700},
     "nemotron50_wildguard50": {"nemotron": 500, "wildguard": 500},
     "nemotron70_wildguard30": {"nemotron": 700, "wildguard": 300},
     "nemotron80_wildguard20": {"nemotron": 800, "wildguard": 200},
 }
 
 SMOKE_MIXTURES = {
+    "nemotron30_wildguard70": {"nemotron": 30, "wildguard": 70},
     "nemotron50_wildguard50": {"nemotron": 50, "wildguard": 50},
     "nemotron70_wildguard30": {"nemotron": 70, "wildguard": 30},
     "nemotron80_wildguard20": {"nemotron": 80, "wildguard": 20},
 }
 
 SMOKE_VALIDATION_MIXTURES = {
+    "nemotron30_wildguard70": {"nemotron": 6, "wildguard": 14},
     "nemotron50_wildguard50": {"nemotron": 10, "wildguard": 10},
     "nemotron70_wildguard30": {"nemotron": 14, "wildguard": 6},
     "nemotron80_wildguard20": {"nemotron": 16, "wildguard": 4},
@@ -227,7 +231,53 @@ def build_arm(
     smoke: bool,
 ) -> dict[str, Any]:
     if output_dir.exists() and any(output_dir.iterdir()):
-        raise FileExistsError(f"Refusing to overwrite non-empty directory: {output_dir}")
+        manifest_path = output_dir / "manifest.json"
+        if not manifest_path.is_file():
+            raise FileExistsError(f"Refusing to overwrite non-empty directory: {output_dir}")
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected = {
+            "source": arm,
+            "seed": seed,
+            "smoke": smoke,
+            "train_examples": sum(train_budgets.values()),
+            "validation_examples": sum(validation_budgets.values()),
+        }
+        mismatches = {
+            key: (existing.get(key), value)
+            for key, value in expected.items()
+            if existing.get(key) != value
+        }
+        if (existing.get("mixture") or {}).get("train") != train_budgets:
+            mismatches["mixture.train"] = ((existing.get("mixture") or {}).get("train"), train_budgets)
+        if (existing.get("mixture") or {}).get("validation") != validation_budgets:
+            mismatches["mixture.validation"] = (
+                (existing.get("mixture") or {}).get("validation"),
+                validation_budgets,
+            )
+        expected_parents = {
+            source: stable_hash(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
+            for source, manifest in provenance["parent_manifests"].items()
+        }
+        if existing.get("parent_manifest_sha256") != expected_parents:
+            mismatches["parent_manifest_sha256"] = (
+                existing.get("parent_manifest_sha256"),
+                expected_parents,
+            )
+        if existing.get("cross_source_cleaning") != provenance["audit"]:
+            mismatches["cross_source_cleaning"] = (
+                existing.get("cross_source_cleaning"),
+                provenance["audit"],
+            )
+        for split in ("train", "validation"):
+            path = output_dir / f"{split}.jsonl"
+            recorded_hash = str(((existing.get("splits") or {}).get(split) or {}).get("sha256") or "")
+            if not path.is_file() or not recorded_hash or file_hash(path) != recorded_hash:
+                mismatches[f"splits.{split}.sha256"] = (recorded_hash, "actual file hash")
+        if mismatches:
+            raise FileExistsError(
+                f"Refusing to overwrite incompatible directory: {output_dir}; mismatches={mismatches}"
+            )
+        return existing
 
     selected: dict[str, list[dict[str, Any]]] = {"train": [], "validation": []}
     for split, budgets in (("train", train_budgets), ("validation", validation_budgets)):

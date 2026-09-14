@@ -7,11 +7,12 @@ The completed natural-source study already supplies the two endpoints:
 - 100% Nemotron / 0% WildGuard;
 - 0% Nemotron / 100% WildGuard.
 
-This follow-up adds three fixed-row-budget interpolation points while holding the
+This follow-up adds four fixed-row-budget interpolation points while holding the
 base model, output contract, optimizer, training steps and validation size fixed.
 
 | Arm | Nemotron train | WildGuard train | Total train | Validation |
 | --- | ---: | ---: | ---: | ---: |
+| `nemotron30_wildguard70` | 24,000 | 56,000 | 80,000 | 300 / 700 |
 | `nemotron50_wildguard50` | 40,000 | 40,000 | 80,000 | 500 / 500 |
 | `nemotron70_wildguard30` | 56,000 | 24,000 | 80,000 | 700 / 300 |
 | `nemotron80_wildguard20` | 64,000 | 16,000 | 80,000 | 800 / 200 |
@@ -30,6 +31,25 @@ cross-source train/validation leakage before ratio sampling.
 The builder writes counts, source quotas, distributions, parent-manifest hashes,
 split hashes and the cleaning audit to every output `manifest.json`.
 
+In the current pinned inputs, 642 normalized exact contents occur in both
+sources and 113 of them have conflicting labels. Cleaning removes 5,711
+Nemotron training rows and 632 WildGuard training rows because complete groups,
+not isolated rows, are the unit of removal.
+
+The selected sources do have different distributions. Their Safe/Unsafe priors
+happen to be similar, so that marginal changes little; source, language, content
+and P/PR exposure change substantially:
+
+| Train arm | Safe | Unsafe | P | PR | English |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 30% Nemotron / 70% WildGuard | 49,042 | 30,958 | 42,709 | 37,291 | 58,816 |
+| 50% Nemotron / 50% WildGuard | 48,998 | 31,002 | 42,020 | 37,980 | 44,664 |
+| 70% Nemotron / 30% WildGuard | 48,874 | 31,126 | 40,801 | 39,199 | 30,492 |
+| 80% Nemotron / 20% WildGuard | 48,919 | 31,081 | 40,104 | 39,896 | 23,417 |
+
+These are row-budget mixtures, not token-budget mixtures. Token length remains
+a measured source characteristic instead of being artificially equalized.
+
 ## Controlled training recipe
 
 - local offline Qwen3-4B base;
@@ -38,13 +58,12 @@ split hashes and the cleaning audit to every output `manifest.json`.
 - BF16, SDPA, gradient checkpointing, maximum length 2,048;
 - one epoch, constant learning rate `1e-5`, no warmup;
 - per-device batch 1, gradient accumulation 32;
-- one arm on each of GPUs 0, 1 and 2; effective batch 32 per arm;
+- one arm on each of GPUs 0, 1, 2 and 3; effective batch 32 per arm;
 - 2,500 optimizer updates and one final-epoch checkpoint per arm;
 - seed 3407.
 
-The fourth A30 is deliberately left free for a later orthogonal arm instead of
-spending it on a duplicate seed. A WildGuard-majority 30/70 point can be added
-only if the 50/50 result indicates the optimum lies toward the WildGuard endpoint.
+The GPU mapping is fixed by array order: GPU 0 runs 50/50, GPU 1 runs 70/30,
+GPU 2 runs 80/20, and GPU 3 runs 30/70. All four arms train concurrently.
 
 ## Fully offline company-machine commands
 
@@ -77,5 +96,5 @@ tail -n 120 logs/source-study-mixtures/train_master.nohup.log
 ```
 
 The train phase is idempotent: a completed arm is skipped, and an arm with an
-existing checkpoint is resumed. The runner refuses to launch if GPUs 0-2 are
+existing checkpoint is resumed. The runner refuses to launch if GPUs 0-3 are
 already using more than 2 GiB or if another mixture runner owns the lock.

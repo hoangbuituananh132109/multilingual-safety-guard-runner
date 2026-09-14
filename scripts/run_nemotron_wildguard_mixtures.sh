@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Offline fixed-80k Nemotron/WildGuard mixture study for Qwen3-4B.
-# Three one-GPU arms run concurrently on GPUs 0, 1 and 2.
+# Four one-GPU arms run concurrently on GPUs 0, 1, 2 and 3.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -30,16 +30,19 @@ ARMS=(
   nemotron50_wildguard50
   nemotron70_wildguard30
   nemotron80_wildguard20
+  nemotron30_wildguard70
 )
 CONFIGS=(
   source_study_mix_train_qwen3_4b_n50_w50.yaml
   source_study_mix_train_qwen3_4b_n70_w30.yaml
   source_study_mix_train_qwen3_4b_n80_w20.yaml
+  source_study_mix_train_qwen3_4b_n30_w70.yaml
 )
 RUN_DIRS=(
   "$RUN_ROOT/nemotron50_wildguard50_80k_1epoch"
   "$RUN_ROOT/nemotron70_wildguard30_80k_1epoch"
   "$RUN_ROOT/nemotron80_wildguard20_80k_1epoch"
+  "$RUN_ROOT/nemotron30_wildguard70_80k_1epoch"
 )
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -100,14 +103,14 @@ require_model() {
     die "no local model weight file under $SOURCE_STUDY_MODEL_PATH"
 }
 
-require_three_free_gpus() {
-  "$PYTHON_BIN" -c 'import torch; n=torch.cuda.device_count(); print(f"CUDA devices: {n}"); raise SystemExit(0 if n >= 3 else 1)'
+require_four_free_gpus() {
+  "$PYTHON_BIN" -c 'import torch; n=torch.cuda.device_count(); print(f"CUDA devices: {n}"); raise SystemExit(0 if n >= 4 else 1)'
   if command -v nvidia-smi >/dev/null 2>&1 && [[ "${SOURCE_STUDY_ALLOW_BUSY_GPUS:-0}" != "1" ]]; then
     local index used
     while IFS=',' read -r index used; do
       index="${index//[!0-9]/}"
       used="${used//[!0-9]/}"
-      if [[ -n "$index" && "$index" -le 2 && -n "$used" && "$used" -gt 2048 ]]; then
+      if [[ -n "$index" && "$index" -le 3 && -n "$used" && "$used" -gt 2048 ]]; then
         die "GPU $index already uses ${used} MiB; refusing a duplicate launch"
       fi
     done < <(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits)
@@ -128,41 +131,14 @@ validate_sources() {
     --data-dir "$SOURCE_ROOT/wildguardtrain_en_natural" >/dev/null
 }
 
-tree_state() {
-  local root="$1" present=0 arm
-  for arm in "${ARMS[@]}"; do
-    [[ ! -e "$root/$arm" ]] || present=$((present + 1))
-  done
-  printf '%s\n' "$present"
-}
-
 prepare() {
-  local full_state smoke_state
   validate_sources
-  full_state="$(tree_state "$DATA_ROOT")"
-  smoke_state="$(tree_state "$DATA_ROOT/_smoke")"
-
-  if [[ "$full_state" == "0" ]]; then
-    "$PYTHON_BIN" scripts/build_nemotron_wildguard_mixtures.py \
-      --source-root "$SOURCE_ROOT" --output-root "$DATA_ROOT" --seed 3407 \
-      > "$LOG_ROOT/prepare_full.json"
-  elif [[ "$full_state" == "3" ]]; then
-    validate_tree "$DATA_ROOT"
-    echo "[$(date -Is)] PREPARE SKIP: full mixture tree already valid"
-  else
-    die "partial full mixture tree exists under $DATA_ROOT; do not overwrite it"
-  fi
-
-  if [[ "$smoke_state" == "0" ]]; then
-    "$PYTHON_BIN" scripts/build_nemotron_wildguard_mixtures.py \
-      --source-root "$SOURCE_ROOT" --output-root "$DATA_ROOT" --seed 3407 --smoke \
-      > "$LOG_ROOT/prepare_smoke.json"
-  elif [[ "$smoke_state" == "3" ]]; then
-    validate_tree "$DATA_ROOT/_smoke"
-    echo "[$(date -Is)] PREPARE SKIP: smoke mixture tree already valid"
-  else
-    die "partial smoke mixture tree exists under $DATA_ROOT/_smoke; do not overwrite it"
-  fi
+  "$PYTHON_BIN" scripts/build_nemotron_wildguard_mixtures.py \
+    --source-root "$SOURCE_ROOT" --output-root "$DATA_ROOT" --seed 3407 \
+    > "$LOG_ROOT/prepare_full.json"
+  "$PYTHON_BIN" scripts/build_nemotron_wildguard_mixtures.py \
+    --source-root "$SOURCE_ROOT" --output-root "$DATA_ROOT" --seed 3407 --smoke \
+    > "$LOG_ROOT/prepare_smoke.json"
 
   validate_tree "$DATA_ROOT"
   validate_tree "$DATA_ROOT/_smoke"
@@ -174,7 +150,7 @@ preflight() {
   validate_sources
   validate_tree "$DATA_ROOT"
   validate_tree "$DATA_ROOT/_smoke"
-  require_three_free_gpus
+  require_four_free_gpus
   "$PYTHON_BIN" -c 'import accelerate,datasets,peft,torch,transformers,yaml; print("offline training imports: OK")'
   for config in "${CONFIGS[@]}"; do require_file "$ROOT/$config"; done
   echo "[$(date -Is)] MIXTURE PREFLIGHT PASSED"
@@ -197,10 +173,10 @@ smoke_one() {
 smoke_all() {
   require_model
   validate_tree "$DATA_ROOT/_smoke"
-  require_three_free_gpus
+  require_four_free_gpus
   local failed=0
   CHILD_PIDS=()
-  for index in 0 1 2; do
+  for index in 0 1 2 3; do
     smoke_one "$index" "$index" &
     CHILD_PIDS+=("$!")
   done
@@ -232,10 +208,10 @@ train_one() {
 train_all() {
   require_model
   validate_tree "$DATA_ROOT"
-  require_three_free_gpus
+  require_four_free_gpus
   local failed=0
   CHILD_PIDS=()
-  for index in 0 1 2; do
+  for index in 0 1 2 3; do
     train_one "$index" "$index" &
     CHILD_PIDS+=("$!")
   done
