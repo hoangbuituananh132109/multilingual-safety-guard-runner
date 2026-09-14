@@ -23,8 +23,10 @@ PHASE="${1:-all}"
 SOURCE_ROOT="$ROOT/work/source-study-natural"
 DATA_ROOT="$ROOT/work/source-study-mixtures"
 RUN_ROOT="$ROOT/runs-source-study-mixtures/qwen3_4b"
+MERGED_ROOT="$RUN_ROOT/merged"
+EVAL_ROOT="$RUN_ROOT/evaluations"
 LOG_ROOT="$ROOT/logs/source-study-mixtures"
-mkdir -p "$RUN_ROOT" "$LOG_ROOT"
+mkdir -p "$RUN_ROOT" "$MERGED_ROOT" "$EVAL_ROOT" "$LOG_ROOT"
 
 ARMS=(
   nemotron50_wildguard50
@@ -44,6 +46,20 @@ RUN_DIRS=(
   "$RUN_ROOT/nemotron80_wildguard20_80k_1epoch"
   "$RUN_ROOT/nemotron30_wildguard70_80k_1epoch"
 )
+
+BENCHMARK_ARGS=(
+  --benchmark "cultureguard_jb=$ROOT/work/benchmarks/cultureguard_jb_9lang.jsonl"
+  --benchmark "cultureguard_standard=$ROOT/work/benchmarks/cultureguard_standard_9lang.jsonl"
+  --benchmark "multijail=$ROOT/work/benchmarks/multijail_4lang.jsonl"
+  --benchmark "polyguard_prompts=$ROOT/work/benchmarks/polyguard_prompts_9lang.jsonl"
+  --benchmark "sea_vi=$ROOT/work/benchmarks/sea_safeguard_vi.jsonl"
+  --benchmark "xsafety=$ROOT/work/benchmarks/xsafety_multilingual.jsonl"
+  --benchmark "xstest_en=$ROOT/work/benchmarks/xstest_en.jsonl"
+  --benchmark "wildguardtest_en=$ROOT/work/benchmarks/wildguardtest_en.jsonl"
+  --benchmark "sealsbench_vi=$ROOT/work/benchmarks/sealsbench_vi.jsonl"
+  --benchmark "linguasafe_vi=$ROOT/work/benchmarks/linguasafe_vi.jsonl"
+)
+BENCHMARK_COUNTS=(13266 24993 1260 30906 1840 19600 450 3408 26644 3884)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 require_file() { [[ -f "$1" ]] || die "missing file: $1"; }
@@ -131,6 +147,20 @@ validate_sources() {
     --data-dir "$SOURCE_ROOT/wildguardtrain_en_natural" >/dev/null
 }
 
+require_benchmarks() {
+  local spec path actual index=0 i
+  for ((i=1; i<${#BENCHMARK_ARGS[@]}; i+=2)); do
+    spec="${BENCHMARK_ARGS[$i]}"
+    path="${spec#*=}"
+    require_file "$path"
+    actual="$(wc -l < "$path")"
+    actual="${actual//[!0-9]/}"
+    [[ "$actual" == "${BENCHMARK_COUNTS[$index]}" ]] || \
+      die "benchmark count mismatch: $path expected=${BENCHMARK_COUNTS[$index]} actual=$actual"
+    index=$((index + 1))
+  done
+}
+
 prepare() {
   validate_sources
   "$PYTHON_BIN" scripts/build_nemotron_wildguard_mixtures.py \
@@ -150,6 +180,7 @@ preflight() {
   validate_sources
   validate_tree "$DATA_ROOT"
   validate_tree "$DATA_ROOT/_smoke"
+  require_benchmarks
   require_four_free_gpus
   "$PYTHON_BIN" -c 'import accelerate,datasets,peft,torch,transformers,yaml; print("offline training imports: OK")'
   for config in "${CONFIGS[@]}"; do require_file "$ROOT/$config"; done
@@ -220,13 +251,93 @@ train_all() {
   [[ "$failed" == "0" ]] || die "a training arm failed; inspect $LOG_ROOT/train_*.log"
 }
 
+merge_one() {
+  local gpu="$1" index="$2" arm="${ARMS[$2]}"
+  local adapter="${RUN_DIRS[$2]}/final" output="$MERGED_ROOT/$arm"
+  require_file "$adapter/adapter_config.json"
+  if [[ -f "$output/config.json" && -f "$output/tokenizer_config.json" && -f "$output/merge_manifest.json" ]]; then
+    echo "[$(date -Is)] MERGE SKIP gpu=$gpu arm=$arm: complete"
+    return
+  fi
+  [[ ! -e "$output" ]] || die "incomplete merge directory exists: $output"
+  echo "[$(date -Is)] MERGE START gpu=$gpu arm=$arm"
+  CUDA_VISIBLE_DEVICES="$gpu" "$PYTHON_BIN" merge_adapter.py \
+    --base-model "$SOURCE_STUDY_MODEL_PATH" --revision main \
+    --adapter "$adapter" --output "$output" --dtype bf16 \
+    > "$LOG_ROOT/merge_${arm}.log" 2>&1
+  require_file "$output/config.json"
+  require_file "$output/tokenizer_config.json"
+  require_file "$output/merge_manifest.json"
+  echo "[$(date -Is)] MERGE COMPLETE gpu=$gpu arm=$arm"
+}
+
+merge_all() {
+  require_model
+  require_four_free_gpus
+  local failed=0 index pid
+  CHILD_PIDS=()
+  for index in 0 1 2 3; do
+    merge_one "$index" "$index" &
+    CHILD_PIDS+=("$!")
+  done
+  for pid in "${CHILD_PIDS[@]}"; do wait "$pid" || failed=1; done
+  CHILD_PIDS=()
+  [[ "$failed" == 0 ]] || die "a merge failed; inspect $LOG_ROOT/merge_*.log"
+}
+
+eval_complete() {
+  [[ -f "$1/metrics.json" ]] && grep -q '"status": "complete"' "$1/progress.json" 2>/dev/null
+}
+
+eval_one() {
+  local gpu="$1" index="$2" root="$3" sample="$4" arm="${ARMS[$2]}"
+  local output="$root/$arm"
+  if eval_complete "$output"; then
+    echo "[$(date -Is)] EVAL SKIP gpu=$gpu arm=$arm: complete"
+    return
+  fi
+  local sample_args=()
+  [[ -z "$sample" ]] || sample_args=(--sample "$sample")
+  echo "[$(date -Is)] EVAL START gpu=$gpu arm=$arm sample=${sample:-full}"
+  CUDA_VISIBLE_DEVICES="$gpu" "$PYTHON_BIN" core/evaluate.py \
+    --base-model "$MERGED_ROOT/$arm" --revision main --family nemotron \
+    --backend vllm --tensor-parallel-size 1 \
+    --gpu-memory-utilization "${SOURCE_STUDY_EVAL_GPU_MEMORY:-0.97}" \
+    --max-model-len "${SOURCE_STUDY_MAX_MODEL_LEN:-8192}" \
+    --batch-size 8 --vllm-chunk-size "${SOURCE_STUDY_VLLM_CHUNK_SIZE:-512}" \
+    --decoding-profile greedy --taxonomy-mode off --thinking-mode no_think \
+    --max-new-tokens 128 --seed 3407 --parse-error-policy incorrect \
+    "${sample_args[@]}" "${BENCHMARK_ARGS[@]}" --output-dir "$output" \
+    > "$LOG_ROOT/eval_${arm}_$(basename "$root").log" 2>&1
+  eval_complete "$output" || die "evaluation incomplete: $arm"
+  echo "[$(date -Is)] EVAL COMPLETE gpu=$gpu arm=$arm sample=${sample:-full}"
+}
+
+eval_all() {
+  local root="$1" sample="$2" failed=0 index pid
+  require_benchmarks
+  require_four_free_gpus
+  mkdir -p "$root"
+  CHILD_PIDS=()
+  for index in 0 1 2 3; do
+    eval_one "$index" "$index" "$root" "$sample" &
+    CHILD_PIDS+=("$!")
+  done
+  for pid in "${CHILD_PIDS[@]}"; do wait "$pid" || failed=1; done
+  CHILD_PIDS=()
+  [[ "$failed" == 0 ]] || die "an evaluation failed; inspect $LOG_ROOT/eval_*.log"
+}
+
 case "$PHASE" in
-  all) prepare; preflight; smoke_all; train_all ;;
+  all) prepare; preflight; smoke_all; train_all; merge_all; eval_all "$RUN_ROOT/_smoke_evaluations" 8; eval_all "$EVAL_ROOT" "" ;;
   prepare) prepare ;;
   preflight) preflight ;;
   smoke) smoke_all ;;
   train) train_all ;;
-  *) die "usage: bash scripts/run_nemotron_wildguard_mixtures.sh [all|prepare|preflight|smoke|train]" ;;
+  merge) merge_all ;;
+  eval-smoke) eval_all "$RUN_ROOT/_smoke_evaluations" 8 ;;
+  eval) eval_all "$EVAL_ROOT" "" ;;
+  *) die "usage: bash scripts/run_nemotron_wildguard_mixtures.sh [all|prepare|preflight|smoke|train|merge|eval-smoke|eval]" ;;
 esac
 
 echo "[$(date -Is)] NEMOTRON/WILDGUARD MIXTURE COMPLETE phase=$PHASE"
