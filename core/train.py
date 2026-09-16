@@ -26,9 +26,11 @@ from transformers import (
 try:
     from .prompt import N23, render_instruction, render_prompt
     from .train_resume_gate import prepare_resume
+    from .train_stall_diagnostics import dump_stack_if_stalled
 except ImportError:
     from prompt import N23, render_instruction, render_prompt
     from train_resume_gate import prepare_resume
+    from train_stall_diagnostics import dump_stack_if_stalled
 
 
 def log(message: str) -> None:
@@ -347,7 +349,11 @@ def main() -> None:
     log("building Trainer...")
     log_rank("entering Trainer construction")
     eval_dataset = None if args.skip_eval else tokenized["validation"]
-    trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=eval_dataset, data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
+    trainer_init_timeout = float(os.environ.get("TRAINER_INIT_STACK_TIMEOUT_SEC", "90"))
+    rank = int(os.environ.get("RANK", "0"))
+    with dump_stack_if_stalled(output, "trainer_init", rank, trainer_init_timeout) as stack_path:
+        log_rank(f"Trainer stack diagnostic: {stack_path} after {trainer_init_timeout:g}s")
+        trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=eval_dataset, data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
     log_rank("Trainer constructed")
     is_world_process_zero = trainer.is_world_process_zero()
     if is_world_process_zero:
