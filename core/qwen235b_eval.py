@@ -114,6 +114,40 @@ def _render_messages(tokenizer: Any, messages: list[dict[str, str]], thinking_mo
         return tokenizer.apply_chat_template(messages, **kwargs)
 
 
+def _expected_output(row: dict[str, Any]) -> str:
+    """Read the normalized gold label from either supported bundle schema.
+
+    The original Qwen bundle stores ``expected_output`` and ``messages``.
+    The unified benchmark transfer bundle intentionally stores only
+    ``id``, ``prompt`` and ``ground_truth``.  Supporting both here keeps the
+    evaluator usable with the exact aggregate ZIP without rebuilding it.
+    """
+    value: Any = row.get("expected_output")
+    if value is None:
+        value = row.get("ground_truth")
+        if isinstance(value, dict):
+            value = value.get("label")
+            if value is None and "binary" in row.get("ground_truth", {}):
+                value = "unsafe" if int(row["ground_truth"]["binary"]) else "safe"
+    label = str(value or "").strip().casefold()
+    if label not in {"safe", "unsafe"}:
+        raise ValueError(f"Bundle row {row.get('id')} has invalid ground truth: {value!r}")
+    return label
+
+
+def _render_row_prompt(tokenizer: Any, row: dict[str, Any], thinking_mode: str) -> str:
+    """Render either message-based rows or the aggregate bundle's raw prompt."""
+    messages = row.get("messages")
+    if isinstance(messages, list) and len(messages) >= 2:
+        return _render_messages(tokenizer, messages, thinking_mode)
+    prompt = row.get("prompt")
+    if isinstance(prompt, str) and prompt.strip():
+        # Aggregate transfer rows already contain the complete classifier
+        # instruction, conversation, target marker, and output marker.
+        return prompt
+    raise ValueError(f"Bundle row {row.get('id')} has neither messages nor prompt")
+
+
 def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
@@ -179,11 +213,10 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
                 continue
             if args.limit is not None and total_seen >= args.limit:
                 break
-            messages = row.get("messages")
-            if not isinstance(messages, list) or len(messages) < 2:
-                raise ValueError(f"Bundle row {row.get('id')} has no messages")
+            expected_output = _expected_output(row)
             pending_rows.append(row)
-            pending_prompts.append(_render_messages(tokenizer, messages, args.thinking_mode))
+            pending_prompts.append(_render_row_prompt(tokenizer, row, args.thinking_mode))
+            row["expected_output"] = expected_output
             seen_per_benchmark[benchmark] += 1
             total_seen += 1
             if len(pending_rows) >= args.batch_size:
