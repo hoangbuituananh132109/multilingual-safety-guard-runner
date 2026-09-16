@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import argparse
 import json
 import tempfile
+import threading
+import time
 import unittest
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from core.hosted_benchmark_eval import (
     build_request,
     extract_bundle,
     metric_rows,
+    normalize_endpoint,
     normalize_row,
     parse_host_response,
+    run,
 )
 
 
@@ -47,6 +53,27 @@ class HostedBenchmarkEvalTests(unittest.TestCase):
         self.assertEqual(result[0]["balanced_accuracy"], 50.0)
         self.assertEqual(result[0]["parse_rate"], 100.0)
 
+    def test_parse_errors_are_incorrect_for_both_ground_truth_classes(self) -> None:
+        rows = [
+            {"benchmark": "demo", "language": "vi", "view": "P", "expected_output": "safe", "prediction": None},
+            {"benchmark": "demo", "language": "vi", "view": "P", "expected_output": "unsafe", "prediction": None},
+        ]
+        result = metric_rows(rows)[0]
+        self.assertEqual(result["safe_recall"], 0.0)
+        self.assertEqual(result["unsafe_recall"], 0.0)
+        self.assertEqual(result["balanced_accuracy"], 0.0)
+        self.assertEqual(result["parse_rate"], 0.0)
+
+    def test_normalize_endpoint_accepts_vllm_base_or_full_chat_url(self) -> None:
+        self.assertEqual(
+            normalize_endpoint("http://model-host:8000/v1"),
+            "http://model-host:8000/v1/chat/completions",
+        )
+        self.assertEqual(
+            normalize_endpoint("http://model-host:8000/v1/chat/completions"),
+            "http://model-host:8000/v1/chat/completions",
+        )
+
     def test_extract_bundle_rejects_zip_slip(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -62,6 +89,77 @@ class HostedBenchmarkEvalTests(unittest.TestCase):
         self.assertEqual(request["temperature"], 0.0)
         self.assertEqual(request["max_tokens"], 16)
         self.assertEqual(request["messages"][0]["content"], "hello")
+
+    def test_run_uses_bounded_parallel_http_and_preserves_row_order(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            active = 0
+            maximum_active = 0
+            lock = threading.Lock()
+
+            def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
+                length = int(self.headers.get("Content-Length", "0"))
+                self.rfile.read(length)
+                with self.lock:
+                    type(self).active += 1
+                    type(self).maximum_active = max(type(self).maximum_active, type(self).active)
+                time.sleep(0.03)
+                payload = json.dumps({"choices": [{"message": {"content": "safe"}}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                with self.lock:
+                    type(self).active -= 1
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                archive = root / "benchmark.zip"
+                rows = [
+                    {"id": f"demo:{index}:P:vi", "prompt": f"prompt {index}", "ground_truth": "safe"}
+                    for index in range(6)
+                ]
+                with zipfile.ZipFile(archive, "w") as handle:
+                    handle.writestr(
+                        "qwen3_safety_benchmark_total.jsonl",
+                        "".join(json.dumps(row) + "\n" for row in rows),
+                    )
+                args = argparse.Namespace(
+                    endpoint=f"http://127.0.0.1:{server.server_port}/v1",
+                    dry_run=False,
+                    zip=str(archive),
+                    extract_dir=str(root / "extract"),
+                    data_file=None,
+                    benchmark=None,
+                    limit_per_benchmark=None,
+                    limit=None,
+                    output_dir=str(root / "output"),
+                    model="demo",
+                    max_tokens=4,
+                    api_key_env="HOSTED_MODEL_API_KEY",
+                    timeout=5.0,
+                    retries=0,
+                    concurrency=3,
+                    progress_every=0,
+                )
+                result = run(args)
+                predictions = [
+                    json.loads(line)
+                    for line in (root / "output" / "predictions.jsonl").read_text(encoding="utf-8").splitlines()
+                ]
+                self.assertEqual([row["id"] for row in predictions], [row["id"] for row in rows])
+                self.assertGreaterEqual(Handler.maximum_active, 2)
+                self.assertEqual(result["manifest"]["concurrency"], 3)
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

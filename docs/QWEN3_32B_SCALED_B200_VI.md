@@ -31,19 +31,45 @@ python3 source_study_natural.py validate \
 - LoRA `r=8`, alpha `32`, dropout `0.05`, `q_proj/v_proj`.
 - BF16, SDPA, max length 2048, gradient checkpointing.
 - 1 epoch, constant LR `1e-5`, seed 3407.
-- 8 GPU, microbatch 2/GPU, gradient accumulation 2: effective global batch 32.
+- GPU được chọn trong `config/qwen3_32b_b200.env.sh`; runner tự suy ra world size.
+- Microbatch mặc định 2/GPU; gradient accumulation được tính tự động để effective global batch luôn là 32.
 - Checkpoint và validation cuối epoch; resume từ checkpoint gần nhất.
 - Eval vLLM TP=1 trên một B200 vì 32B BF16 vừa một B200; chọn GPU bằng `SOURCE_STUDY_32B_EVAL_GPU`.
+
+## Chọn GPU và setting tại một chỗ
+
+Sửa duy nhất file `config/qwen3_32b_b200.env.sh`, ví dụ node chỉ còn GPU 2, 4, 6, 7:
+
+```bash
+export SOURCE_STUDY_32B_TRAIN_GPUS="2,4,6,7"
+export SOURCE_STUDY_32B_EVAL_GPU="5"
+export SOURCE_STUDY_32B_MERGE_GPU="6"
+export SOURCE_STUDY_32B_TARGET_GLOBAL_BATCH="32"
+export SOURCE_STUDY_32B_MICROBATCH="2"
+```
+
+Runner sẽ dùng 4 process và tự đặt gradient accumulation thành 4. Với 8 GPU,
+gradient accumulation là 2. Nếu lựa chọn GPU không thể giữ đúng global batch,
+runner dừng trước khi load model. Xem cấu hình đã resolve bằng:
+
+```bash
+bash scripts/run_qwen3_32b_scaled.sh show-config
+```
+
+Có thể dùng file riêng mà không sửa file mặc định:
+
+```bash
+export SOURCE_STUDY_32B_SETTINGS_FILE=/workspace/my-qwen32-settings.env.sh
+```
 
 ## Trình tự chạy 30:70
 
 ```bash
 cd /workspace/multilingual-safety-guard-runner-no-dataset
 
-export SOURCE_STUDY_32B_MODEL_PATH=/workspace/storage-shared/models/Qwen3-32B
-export SOURCE_STUDY_SCALE_RATIO=30_70
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1
 
+bash scripts/run_qwen3_32b_scaled.sh show-config
 bash scripts/run_qwen3_32b_scaled.sh preflight
 bash scripts/run_qwen3_32b_scaled.sh eval-base-smoke
 

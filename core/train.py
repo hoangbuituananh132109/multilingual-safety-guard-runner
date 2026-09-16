@@ -172,12 +172,22 @@ def main() -> None:
     parser.add_argument("--no-checkpoints", action="store_true", help="Only save the final model; skip periodic checkpoints to save disk/I/O")
     parser.add_argument("--no-final-save", action="store_true", help="Skip the final model export; intended only for disposable capacity probes")
     parser.add_argument("--vram-fraction", type=float, help="Cap the PyTorch allocator to a fraction of each visible GPU")
+    parser.add_argument("--per-device-batch-size", type=int, help="Override training.per_device_batch_size")
+    parser.add_argument("--gradient-accumulation-steps", type=int, help="Override training.gradient_accumulation_steps")
     parser.add_argument("--local-rank", "--local_rank", type=int, default=int(os.environ.get("LOCAL_RANK", "-1")))
     args = parser.parse_args()
     distributed_state = PartialState()
     configure_vram_limit(distributed_state, args.vram_fraction)
     cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
     model_cfg, data_cfg, train_cfg = cfg["model"], cfg["data"], cfg["training"]
+    if args.per_device_batch_size is not None:
+        if args.per_device_batch_size < 1:
+            raise ValueError("--per-device-batch-size must be positive")
+        train_cfg["per_device_batch_size"] = args.per_device_batch_size
+    if args.gradient_accumulation_steps is not None:
+        if args.gradient_accumulation_steps < 1:
+            raise ValueError("--gradient-accumulation-steps must be positive")
+        train_cfg["gradient_accumulation_steps"] = args.gradient_accumulation_steps
     model_cfg["id"] = os.path.expandvars(str(model_cfg["id"]))
     if model_cfg.get("tokenizer_id"):
         model_cfg["tokenizer_id"] = os.path.expandvars(str(model_cfg["tokenizer_id"]))

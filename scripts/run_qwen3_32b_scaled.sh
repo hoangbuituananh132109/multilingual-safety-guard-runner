@@ -9,6 +9,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
+SETTINGS_FILE="${SOURCE_STUDY_32B_SETTINGS_FILE-$ROOT/config/qwen3_32b_b200.env.sh}"
+if [[ -n "$SETTINGS_FILE" ]]; then
+  [[ -f "$SETTINGS_FILE" ]] || {
+    echo "ERROR: settings file not found: $SETTINGS_FILE" >&2
+    exit 1
+  }
+  # shellcheck source=/dev/null
+  source "$SETTINGS_FILE"
+fi
+
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
@@ -23,6 +33,44 @@ TORCHRUN_BIN="${SOURCE_STUDY_TORCHRUN_BIN:-torchrun}"
 PHASE="${1:-preflight}"
 RATIO="${SOURCE_STUDY_SCALE_RATIO:-30_70}"
 export SOURCE_STUDY_32B_MODEL_PATH="${SOURCE_STUDY_32B_MODEL_PATH:-/workspace/storage-shared/models/Qwen3-32B}"
+TRAIN_GPUS="${SOURCE_STUDY_32B_TRAIN_GPUS:-0,1,2,3,4,5,6,7}"
+EVAL_GPU="${SOURCE_STUDY_32B_EVAL_GPU:-0}"
+MERGE_GPU="${SOURCE_STUDY_32B_MERGE_GPU:-$EVAL_GPU}"
+TARGET_GLOBAL_BATCH="${SOURCE_STUDY_32B_TARGET_GLOBAL_BATCH:-32}"
+MICROBATCH="${SOURCE_STUDY_32B_MICROBATCH:-2}"
+
+[[ "$TRAIN_GPUS" =~ ^[0-9]+(,[0-9]+)*$ ]] || {
+  echo "ERROR: SOURCE_STUDY_32B_TRAIN_GPUS must be comma-separated GPU ids" >&2
+  exit 1
+}
+[[ "$EVAL_GPU" =~ ^[0-9]+$ && "$MERGE_GPU" =~ ^[0-9]+$ ]] || {
+  echo "ERROR: eval/merge GPU must each be one integer id" >&2
+  exit 1
+}
+[[ "$TARGET_GLOBAL_BATCH" =~ ^[1-9][0-9]*$ && "$MICROBATCH" =~ ^[1-9][0-9]*$ ]] || {
+  echo "ERROR: target global batch and microbatch must be positive integers" >&2
+  exit 1
+}
+IFS=',' read -r -a TRAIN_GPU_IDS <<< "$TRAIN_GPUS"
+TRAIN_GPU_COUNT="${#TRAIN_GPU_IDS[@]}"
+declare -A SEEN_TRAIN_GPUS=()
+for gpu in "${TRAIN_GPU_IDS[@]}"; do
+  [[ -z "${SEEN_TRAIN_GPUS[$gpu]:-}" ]] || {
+    echo "ERROR: duplicate train GPU id: $gpu" >&2
+    exit 1
+  }
+  SEEN_TRAIN_GPUS[$gpu]=1
+done
+GLOBAL_BATCH_DIVISOR=$((TRAIN_GPU_COUNT * MICROBATCH))
+if (( TARGET_GLOBAL_BATCH % GLOBAL_BATCH_DIVISOR != 0 )); then
+  echo "ERROR: cannot preserve target global batch=$TARGET_GLOBAL_BATCH with GPUs=$TRAIN_GPU_COUNT and microbatch=$MICROBATCH" >&2
+  exit 1
+fi
+GRADIENT_ACCUMULATION=$((TARGET_GLOBAL_BATCH / GLOBAL_BATCH_DIVISOR))
+export SOURCE_STUDY_32B_TRAIN_GPUS="$TRAIN_GPUS"
+export SOURCE_STUDY_32B_EVAL_GPU="$EVAL_GPU"
+export SOURCE_STUDY_32B_MERGE_GPU="$MERGE_GPU"
+export SOURCE_STUDY_32B_GRADIENT_ACCUMULATION="$GRADIENT_ACCUMULATION"
 
 case "$RATIO" in
   30_70)
@@ -142,23 +190,45 @@ require_benchmarks() {
   done
 }
 
-require_gpu_count() {
-  local minimum="$1"
-  "$PYTHON_BIN" -c "import torch; n=torch.cuda.device_count(); print(f'CUDA devices: {n}'); raise SystemExit(0 if n >= $minimum else 1)"
+require_visible_gpu_count() {
+  local visible="$1" expected="$2"
+  CUDA_VISIBLE_DEVICES="$visible" "$PYTHON_BIN" -c "import torch; n=torch.cuda.device_count(); print(f'CUDA devices visible: {n}'); raise SystemExit(0 if n == $expected else 1)"
 }
 
-require_eight_free_gpus() {
-  require_gpu_count 8
+require_selected_free_gpus() {
+  require_visible_gpu_count "$TRAIN_GPUS" "$TRAIN_GPU_COUNT"
   if command -v nvidia-smi >/dev/null 2>&1 && [[ "${SOURCE_STUDY_ALLOW_BUSY_GPUS:-0}" != "1" ]]; then
-    local index used
+    local index used selected
     while IFS=',' read -r index used; do
       index="${index//[!0-9]/}"
       used="${used//[!0-9]/}"
-      if [[ -n "$index" && "$index" -le 7 && -n "$used" && "$used" -gt 2048 ]]; then
+      selected=0
+      for gpu in "${TRAIN_GPU_IDS[@]}"; do
+        [[ "$gpu" != "$index" ]] || selected=1
+      done
+      if [[ "$selected" == "1" && -n "$used" && "$used" -gt 2048 ]]; then
         die "GPU $index already uses ${used} MiB; refusing duplicate 32B launch"
       fi
     done < <(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits)
   fi
+}
+
+show_config() {
+  "$PYTHON_BIN" - <<'PY'
+import json, os
+print(json.dumps({
+    "settings_file": os.environ.get("SOURCE_STUDY_32B_SETTINGS_FILE", "config/qwen3_32b_b200.env.sh"),
+    "model_path": os.environ["SOURCE_STUDY_32B_MODEL_PATH"],
+    "ratio": os.environ.get("SOURCE_STUDY_SCALE_RATIO", "30_70"),
+    "train_gpus": os.environ["SOURCE_STUDY_32B_TRAIN_GPUS"],
+    "train_gpu_count": len(os.environ["SOURCE_STUDY_32B_TRAIN_GPUS"].split(",")),
+    "eval_gpu": os.environ["SOURCE_STUDY_32B_EVAL_GPU"],
+    "merge_gpu": os.environ["SOURCE_STUDY_32B_MERGE_GPU"],
+    "microbatch_per_gpu": int(os.environ.get("SOURCE_STUDY_32B_MICROBATCH", "2")),
+    "gradient_accumulation_steps": int(os.environ["SOURCE_STUDY_32B_GRADIENT_ACCUMULATION"]),
+    "effective_global_batch": int(os.environ.get("SOURCE_STUDY_32B_TARGET_GLOBAL_BATCH", "32")),
+}, indent=2))
+PY
 }
 
 prepare_data() {
@@ -199,13 +269,13 @@ eval_model() {
     echo "[$(date -Is)] 32B EVAL SKIP label=$label: complete"
     return
   fi
-  require_gpu_count 1
+  require_visible_gpu_count "$EVAL_GPU" 1
   local sample_args=()
   [[ -z "$sample" ]] || sample_args=(--sample "$sample")
   local target="$output"
   [[ -z "$sample" ]] || target="${output}_smoke"
   echo "[$(date -Is)] 32B EVAL START label=$label sample=${sample:-full}"
-  CUDA_VISIBLE_DEVICES="${SOURCE_STUDY_32B_EVAL_GPU:-0}" "$PYTHON_BIN" core/evaluate.py \
+  CUDA_VISIBLE_DEVICES="$EVAL_GPU" "$PYTHON_BIN" core/evaluate.py \
     --base-model "$model" --revision main --family nemotron \
     --backend vllm --tensor-parallel-size 1 \
     --gpu-memory-utilization "${SOURCE_STUDY_32B_EVAL_GPU_MEMORY:-0.90}" \
@@ -222,14 +292,16 @@ eval_model() {
 
 smoke_train() {
   preflight
-  require_eight_free_gpus
-  local output="$RUN_ROOT/_smoke/${ARM}_8gpu_2steps"
+  require_selected_free_gpus
+  local output="$RUN_ROOT/_smoke/${ARM}_${TRAIN_GPU_COUNT}gpu_2steps"
   mkdir -p "$RUN_ROOT/_smoke"
   echo "[$(date -Is)] 32B TRAIN SMOKE START ratio=$RATIO"
   SOURCE_STUDY_SCALED_DATA="$DATA_DIR" \
   SOURCE_STUDY_32B_RUN="$output" \
-  CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 "$TORCHRUN_BIN" --standalone --nproc_per_node=8 core/train.py \
+  CUDA_VISIBLE_DEVICES="$TRAIN_GPUS" "$TORCHRUN_BIN" --standalone --nproc_per_node="$TRAIN_GPU_COUNT" core/train.py \
     --config source_study_scaled_train_qwen3_32b.yaml \
+    --per-device-batch-size "$MICROBATCH" \
+    --gradient-accumulation-steps "$GRADIENT_ACCUMULATION" \
     --max-steps 2 --skip-eval --no-checkpoints --no-final-save \
     > "$LOG_ROOT/smoke_train.log" 2>&1
   require_file "$output/train_results.json"
@@ -240,7 +312,7 @@ train() {
   [[ "${SOURCE_STUDY_ALLOW_32B_TRAIN:-0}" == "1" ]] || \
     die "set SOURCE_STUDY_ALLOW_32B_TRAIN=1 after base eval and smoke pass"
   preflight
-  require_eight_free_gpus
+  require_selected_free_gpus
   local resume=()
   if [[ -f "$RUN_DIR/run_complete.json" && -f "$RUN_DIR/final/adapter_config.json" ]]; then
     echo "[$(date -Is)] 32B TRAIN SKIP ratio=$RATIO: complete"
@@ -250,8 +322,11 @@ train() {
   echo "[$(date -Is)] 32B TRAIN START ratio=$RATIO data=$DATA_DIR"
   SOURCE_STUDY_SCALED_DATA="$DATA_DIR" \
   SOURCE_STUDY_32B_RUN="$RUN_DIR" \
-  CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 "$TORCHRUN_BIN" --standalone --nproc_per_node=8 core/train.py \
-    --config source_study_scaled_train_qwen3_32b.yaml "${resume[@]}" \
+  CUDA_VISIBLE_DEVICES="$TRAIN_GPUS" "$TORCHRUN_BIN" --standalone --nproc_per_node="$TRAIN_GPU_COUNT" core/train.py \
+    --config source_study_scaled_train_qwen3_32b.yaml \
+    --per-device-batch-size "$MICROBATCH" \
+    --gradient-accumulation-steps "$GRADIENT_ACCUMULATION" \
+    "${resume[@]}" \
     > "$LOG_ROOT/train.log" 2>&1
   require_file "$RUN_DIR/run_complete.json"
   require_file "$RUN_DIR/final/adapter_config.json"
@@ -266,8 +341,8 @@ merge_trained() {
     return
   fi
   [[ ! -e "$MERGED_DIR" ]] || die "incomplete merge directory exists: $MERGED_DIR"
-  require_gpu_count 1
-  CUDA_VISIBLE_DEVICES="${SOURCE_STUDY_32B_EVAL_GPU:-0}" "$PYTHON_BIN" merge_adapter.py \
+  require_visible_gpu_count "$MERGE_GPU" 1
+  CUDA_VISIBLE_DEVICES="$MERGE_GPU" "$PYTHON_BIN" merge_adapter.py \
     --base-model "$SOURCE_STUDY_32B_MODEL_PATH" --revision main \
     --adapter "$RUN_DIR/final" --output "$MERGED_DIR" --dtype bf16 \
     > "$LOG_ROOT/merge.log" 2>&1
@@ -277,6 +352,7 @@ merge_trained() {
 }
 
 case "$PHASE" in
+  show-config) show_config ;;
   prepare-data) prepare_data ;;
   preflight) preflight ;;
   eval-base-smoke) preflight; eval_model "$SOURCE_STUDY_32B_MODEL_PATH" "$BASE_EVAL_DIR" base 8 ;;
@@ -286,7 +362,9 @@ case "$PHASE" in
   merge) merge_trained ;;
   eval-trained-smoke) preflight; require_file "$MERGED_DIR/config.json"; eval_model "$MERGED_DIR" "$TRAINED_EVAL_DIR" trained 8 ;;
   eval-trained) preflight; require_file "$MERGED_DIR/config.json"; eval_model "$MERGED_DIR" "$TRAINED_EVAL_DIR" trained ;;
-  *) die "usage: bash scripts/run_qwen3_32b_scaled.sh [prepare-data|preflight|eval-base-smoke|eval-base|smoke-train|train|merge|eval-trained-smoke|eval-trained]" ;;
+  *) die "usage: bash scripts/run_qwen3_32b_scaled.sh [show-config|prepare-data|preflight|eval-base-smoke|eval-base|smoke-train|train|merge|eval-trained-smoke|eval-trained]" ;;
 esac
 
-echo "[$(date -Is)] 32B PIPELINE COMPLETE ratio=$RATIO phase=$PHASE"
+if [[ "$PHASE" != "show-config" ]]; then
+  echo "[$(date -Is)] 32B PIPELINE COMPLETE ratio=$RATIO phase=$PHASE"
+fi
