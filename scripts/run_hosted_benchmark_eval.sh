@@ -19,6 +19,7 @@ PHASE="${1:-show-config}"
 PYTHON_BIN="${HOSTED_EVAL_PYTHON_BIN:-python3}"
 ENDPOINT="${HOSTED_MODEL_ENDPOINT:-}"
 MODEL="${HOSTED_MODEL_NAME:-}"
+THINKING_MODE="${HOSTED_MODEL_THINKING_MODE:-no_think}"
 ARCHIVE="${HOSTED_BENCHMARK_ZIP:-zip/qwen3_safety_benchmark_total_v2.zip}"
 EXTRACT_DIR="${HOSTED_BENCHMARK_EXTRACT_DIR:-work/eval-hosted/benchmark-total}"
 OUTPUT_ROOT="${HOSTED_EVAL_OUTPUT_ROOT:-runs/hosted-qwen3-235b}"
@@ -32,10 +33,12 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [[ "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]] || die "HOSTED_EVAL_CONCURRENCY must be positive"
 [[ "$MAX_TOKENS" =~ ^[1-9][0-9]*$ ]] || die "HOSTED_EVAL_MAX_TOKENS must be positive"
 [[ "$RETRIES" =~ ^[0-9]+$ ]] || die "HOSTED_EVAL_RETRIES must be non-negative"
+[[ "$THINKING_MODE" == "no_think" || "$THINKING_MODE" == "think" ]] || die "HOSTED_MODEL_THINKING_MODE must be no_think or think"
 [[ -f "$ARCHIVE" ]] || [[ "$PHASE" == "show-config" ]] || die "missing local benchmark ZIP: $ARCHIVE"
 
 export HOSTED_MODEL_ENDPOINT="$ENDPOINT"
 export HOSTED_MODEL_NAME="$MODEL"
+export HOSTED_MODEL_THINKING_MODE="$THINKING_MODE"
 export HOSTED_BENCHMARK_ZIP="$ARCHIVE"
 export HOSTED_BENCHMARK_EXTRACT_DIR="$EXTRACT_DIR"
 export HOSTED_EVAL_OUTPUT_ROOT="$OUTPUT_ROOT"
@@ -48,6 +51,7 @@ print(json.dumps({
     "settings_file": os.environ.get("HOSTED_EVAL_SETTINGS_FILE", "config/hosted_235b_eval.env.sh"),
     "endpoint": os.environ.get("HOSTED_MODEL_ENDPOINT", ""),
     "model": os.environ.get("HOSTED_MODEL_NAME", ""),
+    "thinking_mode": os.environ.get("HOSTED_MODEL_THINKING_MODE", "no_think"),
     "api_key_set": bool(os.environ.get("HOSTED_MODEL_API_KEY")),
     "benchmark_zip": os.environ.get("HOSTED_BENCHMARK_ZIP", ""),
     "extract_dir": os.environ.get("HOSTED_BENCHMARK_EXTRACT_DIR", ""),
@@ -66,6 +70,7 @@ run_eval() {
     --extract-dir "$EXTRACT_DIR" \
     --endpoint "$ENDPOINT" \
     --model "$MODEL" \
+    --thinking-mode "$THINKING_MODE" \
     --output-dir "$output" \
     --max-tokens "$MAX_TOKENS" \
     --timeout "$TIMEOUT" \
@@ -85,6 +90,7 @@ case "$PHASE" in
       --zip "$ARCHIVE" --extract-dir "$EXTRACT_DIR" \
       --output-dir "$OUTPUT_ROOT/dry-run" \
       --model "$MODEL" --max-tokens "$MAX_TOKENS" \
+      --thinking-mode "$THINKING_MODE" \
       --limit-per-benchmark 1 --dry-run
     ;;
   smoke)

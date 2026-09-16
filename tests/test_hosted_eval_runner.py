@@ -22,6 +22,7 @@ class HostedEvalRunnerTests(unittest.TestCase):
                         'export HOSTED_MODEL_ENDPOINT="http://model-host:8000/v1/chat/completions"',
                         'export HOSTED_MODEL_NAME="Qwen3-235B-A22B"',
                         'export HOSTED_EVAL_CONCURRENCY="12"',
+                        'export HOSTED_MODEL_THINKING_MODE="no_think"',
                     )
                 )
                 + "\n"
@@ -44,6 +45,7 @@ class HostedEvalRunnerTests(unittest.TestCase):
             self.assertEqual(payload["endpoint"], "http://model-host:8000/v1/chat/completions")
             self.assertEqual(payload["model"], "Qwen3-235B-A22B")
             self.assertEqual(payload["concurrency"], 12)
+            self.assertEqual(payload["thinking_mode"], "no_think")
             self.assertFalse(payload["api_key_set"])
 
     def test_dry_run_extracts_local_zip_without_endpoint(self) -> None:

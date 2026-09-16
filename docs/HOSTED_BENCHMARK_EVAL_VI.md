@@ -25,6 +25,8 @@ Smoke tạo `dry_run.json` và luôn ghi `"network_called": false`.
 
 Sửa một file duy nhất: `config/hosted_235b_eval.env.sh`. Có thể điền URL base
 `http://host:port/v1` hoặc URL đầy đủ `/v1/chat/completions`; evaluator tự chuẩn hóa.
+Mặc định `HOSTED_MODEL_THINKING_MODE=no_think` và request gửi
+`chat_template_kwargs.enable_thinking=false`, phù hợp phép so sánh guard no-think trước đây.
 
 ```bash
 cd /workspace/multilingual-safety-guard-runner-no-dataset
@@ -50,6 +52,7 @@ nohup python3 scripts/evaluate_hosted_benchmark.py \
   --output-dir runs/hosted-benchmark-total \
   --endpoint "$HOSTED_MODEL_ENDPOINT" \
   --model "$HOSTED_MODEL_NAME" \
+  --thinking-mode "$HOSTED_MODEL_THINKING_MODE" \
   --concurrency "$HOSTED_EVAL_CONCURRENCY" \
   --max-tokens 16 \
   --timeout 120 \

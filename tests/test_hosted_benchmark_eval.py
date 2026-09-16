@@ -84,11 +84,16 @@ class HostedBenchmarkEvalTests(unittest.TestCase):
                 extract_bundle(archive, root / "out")
 
     def test_build_request_is_deterministic(self) -> None:
-        request = build_request("http://host/v1/chat/completions", "demo", "hello", 16)
+        request = build_request("http://host/v1/chat/completions", "demo", "hello", 16, enable_thinking=False)
         self.assertEqual(request["model"], "demo")
         self.assertEqual(request["temperature"], 0.0)
         self.assertEqual(request["max_tokens"], 16)
         self.assertEqual(request["messages"][0]["content"], "hello")
+        self.assertEqual(request["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_build_request_can_enable_qwen_thinking_explicitly(self) -> None:
+        request = build_request("http://host/v1", "demo", "hello", 64, enable_thinking=True)
+        self.assertEqual(request["chat_template_kwargs"], {"enable_thinking": True})
 
     def test_run_uses_bounded_parallel_http_and_preserves_row_order(self) -> None:
         class Handler(BaseHTTPRequestHandler):
@@ -148,6 +153,7 @@ class HostedBenchmarkEvalTests(unittest.TestCase):
                     retries=0,
                     concurrency=3,
                     progress_every=0,
+                    thinking_mode="no_think",
                 )
                 result = run(args)
                 predictions = [

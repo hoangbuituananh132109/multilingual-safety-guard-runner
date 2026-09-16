@@ -197,12 +197,20 @@ def parse_host_response(payload: Any) -> str | None:
     return _text_from_payload(payload)
 
 
-def build_request(endpoint: str, model: str, prompt: str, max_tokens: int) -> dict[str, Any]:
+def build_request(
+    endpoint: str,
+    model: str,
+    prompt: str,
+    max_tokens: int,
+    *,
+    enable_thinking: bool = False,
+) -> dict[str, Any]:
     del endpoint
     body: dict[str, Any] = {
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
         "max_tokens": max_tokens,
+        "chat_template_kwargs": {"enable_thinking": enable_thinking},
     }
     if model:
         body["model"] = model
@@ -296,9 +304,16 @@ def _evaluate_one(
     api_key: str | None,
     timeout: float,
     retries: int,
+    enable_thinking: bool,
 ) -> tuple[int, dict[str, Any]]:
     index, row = item
-    body = build_request(endpoint, model, row["prompt"], max_tokens)
+    body = build_request(
+        endpoint,
+        model,
+        row["prompt"],
+        max_tokens,
+        enable_thinking=enable_thinking,
+    )
     raw_output = ""
     prediction: str | None = None
     parse_status = "request_error"
@@ -360,7 +375,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "data_file": str(data_path.resolve()),
             "selected_examples": len(rows),
             "benchmarks": dict(sorted(seen_per_benchmark.items())),
-            "sample_request": build_request(endpoint, args.model, rows[0]["prompt"], args.max_tokens),
+            "sample_request": build_request(
+                endpoint,
+                args.model,
+                rows[0]["prompt"],
+                args.max_tokens,
+                enable_thinking=args.thinking_mode == "think",
+            ),
             "network_called": False,
         }
         (output_dir / "dry_run.json").write_text(json.dumps(smoke, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -378,6 +399,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         api_key=api_key,
         timeout=args.timeout,
         retries=args.retries,
+        enable_thinking=args.thinking_mode == "think",
     )
     with predictions_path.open("w", encoding="utf-8", newline="\n") as handle:
         with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
@@ -412,6 +434,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "timeout": args.timeout,
         "retries": args.retries,
         "concurrency": args.concurrency,
+        "thinking_mode": args.thinking_mode,
         "output_sha256": sha256(predictions_path),
         "network_policy": "hosted endpoint only; no model download or local model loading",
     }
@@ -436,6 +459,7 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--thinking-mode", choices=("no_think", "think"), default="no_think")
     parser.add_argument("--progress-every", type=int, default=100)
     parser.add_argument("--api-key-env", default="HOSTED_MODEL_API_KEY")
     parser.add_argument("--dry-run", action="store_true", help="Extract/validate and write sample request; never call endpoint")

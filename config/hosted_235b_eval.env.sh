@@ -4,6 +4,7 @@
 
 export HOSTED_MODEL_ENDPOINT="${HOSTED_MODEL_ENDPOINT:-http://DIEN_DIA_CHI_MODEL:8000/v1}"
 export HOSTED_MODEL_NAME="${HOSTED_MODEL_NAME:-Qwen3-235B-A22B}"
+export HOSTED_MODEL_THINKING_MODE="${HOSTED_MODEL_THINKING_MODE:-no_think}"
 
 # Leave empty when the internal vLLM server does not require a bearer token.
 export HOSTED_MODEL_API_KEY="${HOSTED_MODEL_API_KEY:-}"
