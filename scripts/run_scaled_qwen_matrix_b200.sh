@@ -309,6 +309,7 @@ run_matrix_phase() {
       case "$action" in
         preflight) preflight_one "$model" "$ratio" ;;
         smoke) smoke_one "$model" "$ratio" ;;
+        train) train_one "$model" "$ratio" ;;
         run)
           train_one "$model" "$ratio"
           merge_one "$model" "$ratio"
@@ -328,6 +329,7 @@ case "$PHASE" in
     ;;
   preflight) run_matrix_phase preflight ;;
   smoke) run_matrix_phase smoke ;;
+  train) run_matrix_phase train ;;
   run) run_matrix_phase run ;;
   all)
     while IFS= read -r ratio; do install_ratio "$ratio"; done < <(selected_ratios)
@@ -336,7 +338,7 @@ case "$PHASE" in
     run_matrix_phase run
     ;;
   *)
-    die "usage: bash scripts/run_scaled_qwen_matrix_b200.sh [show-config|install|preflight|smoke|run|all] [32b|8b|4b] [30_70|70_30]"
+    die "usage: bash scripts/run_scaled_qwen_matrix_b200.sh [show-config|install|preflight|smoke|train|run|all] [32b|8b|4b] [30_70|70_30]"
     ;;
 esac
 
