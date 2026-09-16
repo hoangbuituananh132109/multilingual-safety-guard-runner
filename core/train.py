@@ -25,8 +25,10 @@ from transformers import (
 
 try:
     from .prompt import N23, render_instruction, render_prompt
+    from .train_resume_gate import prepare_resume
 except ImportError:
     from prompt import N23, render_instruction, render_prompt
+    from train_resume_gate import prepare_resume
 
 
 def log(message: str) -> None:
@@ -34,6 +36,14 @@ def log(message: str) -> None:
         return
     stamp = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[train] {stamp} {message}", flush=True)
+
+
+def log_rank(message: str) -> None:
+    """Emit a few distributed phase markers from every rank for hang diagnosis."""
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    rank = os.environ.get("RANK", "0")
+    local_rank = os.environ.get("LOCAL_RANK", "0")
+    print(f"[train rank={rank} local_rank={local_rank}] {stamp} {message}", flush=True)
 
 
 def load_training_json(path: str) -> Dataset:
@@ -293,6 +303,7 @@ def main() -> None:
     with distributed_state.local_main_process_first():
         tokenized = raw.map(tokenize, remove_columns=raw["train"].column_names, num_proc=max(1, min(8, os.cpu_count() or 1)), desc="Tokenizing completion-only safety targets")
     log(f"tokenization done in {time.time() - tokenize_start:.1f}s")
+    log_rank("tokenized dataset ready")
     output = Path(cfg["output_dir"])
     output.mkdir(parents=True, exist_ok=True)
     if distributed_state.is_main_process:
@@ -334,16 +345,17 @@ def main() -> None:
     _ta_kwargs = {k: v for k, v in _ta_kwargs.items() if k in _sig_params}
     training_args = _TA(**_ta_kwargs)
     log("building Trainer...")
+    log_rank("entering Trainer construction")
     eval_dataset = None if args.skip_eval else tokenized["validation"]
     trainer = Trainer(model=model, args=training_args, train_dataset=tokenized["train"], eval_dataset=eval_dataset, data_collator=DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=-100, pad_to_multiple_of=8))
-    if trainer.is_world_process_zero():
+    log_rank("Trainer constructed")
+    is_world_process_zero = trainer.is_world_process_zero()
+    if is_world_process_zero:
         trainer.add_callback(StepLogger())
-        resume = sync_resume_intervals(output, args.resume, train_cfg)
-    else:
-        resume = None
-    distributed_state.wait_for_everyone()
-    if not trainer.is_world_process_zero():
-        resume = sync_resume_intervals(output, args.resume, train_cfg)
+    if args.resume is not None:
+        log_rank("synchronizing resume checkpoint metadata")
+    resume = prepare_resume(distributed_state, is_world_process_zero, output, args.resume, train_cfg, sync_resume_intervals)
+    log_rank(f"entering Trainer.train (resume={resume})")
     log(f"starting training (resume={resume}, eval={'skipped' if args.skip_eval else 'enabled'})...")
     train_start = time.time()
     result = trainer.train(resume_from_checkpoint=resume)

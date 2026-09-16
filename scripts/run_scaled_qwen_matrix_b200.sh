@@ -181,7 +181,7 @@ paths_for() {
 }
 
 smoke_one() {
-  local model="$1" ratio="$2" path data smoke_dir
+  local model="$1" ratio="$2" path data smoke_dir smoke_data smoke_rows
   preflight_one "$model" "$ratio"
   require_eight_free_gpus
   path="$(model_path "$model")"
@@ -192,11 +192,24 @@ smoke_one() {
     log "TRAIN SMOKE SKIP model=$model ratio=$ratio: complete"
     return
   fi
+  # A two-step DDP smoke must exercise the model, not tokenize the entire
+  # 200k-400k-row training arm eight times before its first optimizer step.
+  smoke_data="$smoke_dir/_smoke_data"
+  smoke_rows=$((GPU_COUNT * MICROBATCH * GRAD_ACCUM * 2))
+  mkdir -p "$smoke_data"
+  head -n "$smoke_rows" "$data/train.jsonl" > "$smoke_data/train.jsonl"
+  head -n 8 "$data/validation.jsonl" > "$smoke_data/validation.jsonl"
+  [[ "$(wc -l < "$smoke_data/train.jsonl")" -eq "$smoke_rows" ]] || \
+    die "smoke dataset has fewer than $smoke_rows training rows: $data"
+  [[ "$(wc -l < "$smoke_data/validation.jsonl")" -eq 8 ]] || \
+    die "smoke dataset has fewer than 8 validation rows: $data"
+  log "TRAIN SMOKE DATA model=$model ratio=$ratio rows=$smoke_rows"
   run_logged "$MATRIX_ARM_LOG/smoke_train.log" env \
     SOURCE_STUDY_MODEL_PATH="$path" SOURCE_STUDY_SCALED_DATA="$data" SOURCE_STUDY_SCALED_RUN="$smoke_dir" \
     CUDA_VISIBLE_DEVICES="$GPU_IDS" "$TORCHRUN_BIN" --standalone --nproc_per_node="$GPU_COUNT" core/train.py \
     --config "$TRAIN_CONFIG" --per-device-batch-size "$MICROBATCH" \
-    --gradient-accumulation-steps "$GRAD_ACCUM" --max-steps 2 --skip-eval --no-checkpoints --no-final-save
+    --gradient-accumulation-steps "$GRAD_ACCUM" --train-data "$smoke_data/train.jsonl" \
+    --validation-data "$smoke_data/validation.jsonl" --max-steps 2 --skip-eval --no-checkpoints --no-final-save
   require_file "$smoke_dir/train_results.json"
   log "TRAIN SMOKE PASS model=$model ratio=$ratio"
 }
