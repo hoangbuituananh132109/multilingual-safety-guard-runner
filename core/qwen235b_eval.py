@@ -16,6 +16,7 @@ from .qwen235b_eval_bundle import QWEN235B_SYSTEM_PROMPT, sha256
 
 _LABEL_RE = re.compile(r"(?i)\b(safe|unsafe)\b")
 _ANSWER_RE = re.compile(r"(?i)(?:answer|label|classification|prediction|output)\s*[:=-]\s*(safe|unsafe)\b")
+_LANGUAGE_CODES = {"ar", "de", "en", "es", "fr", "hi", "ja", "th", "vi", "zh"}
 
 
 def parse_binary_output(text: str) -> tuple[str | None, str]:
@@ -148,6 +149,37 @@ def _render_row_prompt(tokenizer: Any, row: dict[str, Any], thinking_mode: str) 
     raise ValueError(f"Bundle row {row.get('id')} has neither messages nor prompt")
 
 
+def _row_benchmark(row: dict[str, Any]) -> str:
+    benchmark = str(row.get("benchmark") or "").strip()
+    if benchmark:
+        return benchmark
+    # The compact aggregate bundle uses ids such as
+    # ``cultureguard_jb:nemotron_v3:<hash>:P:ar``.
+    return str(row.get("id") or "unknown").split(":", 1)[0] or "unknown"
+
+
+def _row_view(row: dict[str, Any]) -> str:
+    view = str(row.get("view") or "").strip().upper()
+    if view in {"P", "PR"}:
+        return view
+    for token in reversed(str(row.get("id") or "").split(":")):
+        token = token.strip().upper()
+        if token in {"P", "PR"}:
+            return token
+    return "unknown"
+
+
+def _row_language(row: dict[str, Any]) -> str:
+    language = str(row.get("language") or "").strip().casefold()
+    if language:
+        return language
+    for token in reversed(str(row.get("id") or "").split(":")):
+        token = token.strip().casefold()
+        if token in _LANGUAGE_CODES:
+            return token
+    return "unknown"
+
+
 def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
@@ -206,7 +238,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     with predictions_path.open("w", encoding="utf-8", newline="\n") as handle:
         prediction_handle = handle
         for row in _read_bundle(bundle_path):
-            benchmark = str(row.get("benchmark") or "unknown")
+            benchmark = _row_benchmark(row)
             if args.benchmark and benchmark not in args.benchmark:
                 continue
             if args.limit_per_benchmark is not None and seen_per_benchmark[benchmark] >= args.limit_per_benchmark:
@@ -214,6 +246,9 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             if args.limit is not None and total_seen >= args.limit:
                 break
             expected_output = _expected_output(row)
+            row["benchmark"] = benchmark
+            row["language"] = _row_language(row)
+            row["view"] = _row_view(row)
             pending_rows.append(row)
             pending_prompts.append(_render_row_prompt(tokenizer, row, args.thinking_mode))
             row["expected_output"] = expected_output
