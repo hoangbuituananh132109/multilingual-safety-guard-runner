@@ -190,15 +190,43 @@ def _row_language(row: dict[str, Any]) -> str:
     return "unknown"
 
 
-def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
-    from transformers import AutoTokenizer
-    from vllm import LLM, SamplingParams
+def _tokenize_bounded_prompt(
+    tokenizer: Any, prompt: str, max_model_len: int, max_new_tokens: int
+) -> tuple[dict[str, list[int]], int, bool]:
+    """Cap the *rendered* prompt, preserving instructions and target marker.
 
+    Pass token IDs to vLLM so it cannot re-tokenize a decoded truncation into
+    a longer sequence than the checked budget.
+    """
+    if max_model_len <= max_new_tokens or max_new_tokens < 1:
+        raise ValueError("max_model_len must exceed positive max_new_tokens")
+    token_ids = tokenizer.encode(prompt, add_special_tokens=False)
+    original_count = len(token_ids)
+    budget = max_model_len - max_new_tokens
+    truncated = original_count > budget
+    if truncated:
+        head = budget // 2
+        tail = budget - head
+        token_ids = token_ids[:head] + token_ids[-tail:]
+    return {"prompt_token_ids": token_ids}, original_count, truncated
+
+
+def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     bundle_path = Path(args.bundle)
     output_dir = Path(args.output_dir)
     if not bundle_path.is_file():
         raise FileNotFoundError(f"Missing local Qwen235B bundle: {bundle_path}")
+    if args.max_model_len <= args.max_new_tokens or args.max_new_tokens < 1:
+        raise ValueError("max_model_len must exceed positive max_new_tokens")
     output_dir.mkdir(parents=True, exist_ok=True)
+    predictions_path = output_dir / "predictions.jsonl"
+    if predictions_path.exists():
+        raise FileExistsError(
+            f"Refusing to overwrite {predictions_path}; choose a new --output-dir"
+        )
+
+    from transformers import AutoTokenizer
+    from vllm import LLM, SamplingParams
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True, trust_remote_code=args.trust_remote_code)
     llm = LLM(
@@ -212,12 +240,11 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         trust_remote_code=args.trust_remote_code,
     )
     sampling = SamplingParams(n=1, temperature=0.0, top_p=1.0, max_tokens=args.max_new_tokens, seed=args.seed)
-    predictions_path = output_dir / "predictions.jsonl"
     records: list[dict[str, Any]] = []
     seen_per_benchmark: dict[str, int] = defaultdict(int)
     total_seen = 0
     pending_rows: list[dict[str, Any]] = []
-    pending_prompts: list[str] = []
+    pending_prompts: list[dict[str, list[int]]] = []
     prediction_handle: Any = None
 
     def flush() -> None:
@@ -237,6 +264,9 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
                 "prediction": prediction,
                 "parse_status": parse_status,
                 "raw_output": raw,
+                "prompt_tokens_original": row["_prompt_tokens_original"],
+                "prompt_tokens_used": row["_prompt_tokens_used"],
+                "prompt_truncated": row["_prompt_truncated"],
             }
             records.append(record)
             if prediction_handle is not None:
@@ -245,7 +275,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         pending_rows.clear()
         pending_prompts.clear()
 
-    with predictions_path.open("w", encoding="utf-8", newline="\n") as handle:
+    with predictions_path.open("x", encoding="utf-8", newline="\n") as handle:
         prediction_handle = handle
         for row in _read_bundle(bundle_path):
             benchmark = _row_benchmark(row)
@@ -259,9 +289,16 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             row["benchmark"] = benchmark
             row["language"] = _row_language(row)
             row["view"] = _row_view(row)
-            pending_rows.append(row)
-            pending_prompts.append(_render_row_prompt(tokenizer, row, args.thinking_mode))
             row["expected_output"] = expected_output
+            rendered = _render_row_prompt(tokenizer, row, args.thinking_mode)
+            bounded_prompt, original_count, truncated = _tokenize_bounded_prompt(
+                tokenizer, rendered, args.max_model_len, args.max_new_tokens
+            )
+            row["_prompt_tokens_original"] = original_count
+            row["_prompt_tokens_used"] = len(bounded_prompt["prompt_token_ids"])
+            row["_prompt_truncated"] = truncated
+            pending_rows.append(row)
+            pending_prompts.append(bounded_prompt)
             seen_per_benchmark[benchmark] += 1
             total_seen += 1
             if len(pending_rows) >= args.batch_size:
@@ -286,6 +323,8 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": args.max_model_len,
         "max_new_tokens": args.max_new_tokens,
+        "max_input_tokens": args.max_model_len - args.max_new_tokens,
+        "truncated_examples": sum(bool(row["prompt_truncated"]) for row in records),
         "examples": len(records),
         "benchmarks": dict(sorted(seen_per_benchmark.items())),
         "output_sha256": sha256(predictions_path),
