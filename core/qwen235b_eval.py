@@ -1,4 +1,4 @@
-"""Offline vLLM evaluator for the Qwen3-235B binary safety bundle."""
+"""Offline vLLM evaluator for a unified Qwen3 binary safety bundle."""
 
 from __future__ import annotations
 
@@ -83,16 +83,19 @@ def _group_metric(group: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def metric_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    benchmark_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    detailed_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         benchmark = str(row.get("benchmark") or "unknown")
         language = str(row.get("language") or "unknown")
         view = str(row.get("view") or "unknown")
-        groups[f"{benchmark}|{language}|{view}"].append(row)
-    if not groups:
+        benchmark_groups[f"{benchmark}|ALL|ALL"].append(row)
+        detailed_groups[f"{benchmark}|{language}|{view}"].append(row)
+    if not detailed_groups:
         return []
-    result = [_group_metric(group, members) for group, members in sorted(groups.items())]
-    result.insert(0, _group_metric("ALL", rows))
+    result = [_group_metric("ALL", rows)]
+    result.extend(_group_metric(group, members) for group, members in sorted(benchmark_groups.items()))
+    result.extend(_group_metric(group, members) for group, members in sorted(detailed_groups.items()))
     return result
 
 
@@ -273,7 +276,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             writer.writeheader()
             writer.writerows(metrics)
     manifest = {
-        "contract": "qwen3_235b_binary_v1",
+        "contract": "qwen3_binary_safety_v1",
         "model": str(args.model),
         "bundle": str(bundle_path.resolve()),
         "bundle_sha256": sha256(bundle_path),
@@ -293,7 +296,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate Qwen3-235B on the local unified safety bundle with vLLM")
+    parser = argparse.ArgumentParser(description="Evaluate a local Qwen3 model on the unified safety bundle with vLLM")
     parser.add_argument("--model", required=True, help="Local model directory; no Hub lookup is attempted")
     parser.add_argument("--bundle", type=Path, default=Path("work/eval-qwen235b/qwen235b_eval.jsonl"))
     parser.add_argument("--output-dir", type=Path, default=Path("runs/qwen235b-eval"))
