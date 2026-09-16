@@ -144,8 +144,15 @@ def _render_row_prompt(tokenizer: Any, row: dict[str, Any], thinking_mode: str) 
     prompt = row.get("prompt")
     if isinstance(prompt, str) and prompt.strip():
         # Aggregate transfer rows already contain the complete classifier
-        # instruction, conversation, target marker, and output marker.
-        return prompt
+        # instruction, conversation, target marker, and output marker.  The
+        # hosted evaluator sends this same string as a user message; apply
+        # the local model's chat template here as well rather than feeding a
+        # raw, untemplated instruction to an Instruct checkpoint.
+        return _render_messages(
+            tokenizer,
+            [{"role": "user", "content": prompt}],
+            thinking_mode,
+        )
     raise ValueError(f"Bundle row {row.get('id')} has neither messages nor prompt")
 
 
