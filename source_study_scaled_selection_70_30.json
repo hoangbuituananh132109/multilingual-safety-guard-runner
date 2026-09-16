@@ -7,19 +7,21 @@
     "wildguard": 30
   },
   "requested_scaled_train_rows": {
-    "nemotron": 186667,
-    "wildguard": 80000
+    "nemotron": 202405,
+    "wildguard": 86745
   },
   "caps": {
     "nemotron": 420000,
-    "wildguard": 80000
+    "wildguard_raw_file_rows": 86759,
+    "wildguard_normalized_valid_rows": 86745
   },
   "validation_rows": {
     "nemotron": 700,
     "wildguard": 300
   },
   "notes": [
-    "The builder clamps to post-cleaning eligible rows and preserves complete semantic groups.",
+    "The builder requests every normalized-valid WildGuard row, then clamps to post-cleaning eligible complete prompt groups.",
+    "Nemotron selection keeps complete upstream IDs across languages and targets near-equal counts over the nine selected languages.",
     "This is a Nemo-heavy scale-sensitivity comparator, not a replacement for the 30:70 main arm."
   ]
 }

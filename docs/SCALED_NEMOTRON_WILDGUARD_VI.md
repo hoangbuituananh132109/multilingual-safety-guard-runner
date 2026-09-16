@@ -11,14 +11,16 @@
 - **Rò rỉ:** builder loại benchmark overlap, exact-content conflict và giữ complete semantic group; manifest ghi lại số bị loại.
 - **Ngân sách:** một epoch trên 4 GPU; checkpoint cuối epoch và checkpoint gần nhất để resume.
 
-## Quy mô trước khi lọc
+## Quy mô yêu cầu và thực tế sau lọc
 
-| Recipe | Nemotron | WildGuard | Tổng | Validation N/W | Vai trò |
+| Recipe | Yêu cầu N/W | Thực tế N/W | Train tổng | Validation | Vai trò |
 |---|---:|---:|---:|---:|---|
-| 30:70 | 34,286 | 80,000 | 114,286 | 300 / 700 | Nhánh chính theo matched-80k |
-| 70:30 | 186,667 | 80,000 | 266,667 | 700 / 300 | Kiểm chứng Nemo-heavy scale |
+| 30:70 | 37,176 / 86,745 | 35,155 / 82,028 | 117,183 | 997 | Nhánh chính theo matched-80k |
+| 70:30 | 202,405 / 86,745 | 192,332 / 82,428 | 274,760 | 1,000 | Kiểm chứng Nemo-heavy scale |
 
-Đây là số yêu cầu trước khi làm sạch. Nếu WildGuard còn ít hơn 80k sau khi loại overlap, builder tự hạ WildGuard và tính lại Nemotron theo tỉ lệ; nếu complete-group khiến số thực tế lệch vài mẫu, `manifest.json` là nguồn sự thật.
+WildGuard có 86,759 dòng thô và 86,745 dòng hợp lệ. Builder yêu cầu toàn bộ phần hợp lệ, sau đó loại benchmark leakage, duplicate/conflict và mọi complete prompt group chạm exact overlap với Nemotron. Validation giữ 700 WildGuard ở 30:70 và 300 ở 70:30, nên hai train pool có kích thước hơi khác nhau.
+
+Nemotron được chọn theo complete upstream ID xuyên 9 ngôn ngữ, không lấy ngẫu nhiên từng dòng. 30:70 có 3,906 dòng ở tám ngôn ngữ và 3,907 dòng tiếng Pháp; 70:30 có 21,370 dòng ở bảy ngôn ngữ và 21,371 dòng ở Đức/Pháp. `manifest.json` là nguồn sự thật cho mọi số thực tế.
 
 ## Kết quả matched-80k đã có
 

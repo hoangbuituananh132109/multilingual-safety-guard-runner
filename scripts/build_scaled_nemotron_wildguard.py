@@ -3,9 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from core.source_study_data import StudyRow, benchmark_hashes, canonicalize, stable_hash
 from core.source_study_natural_data import (
@@ -68,6 +73,35 @@ def group_rows(rows: Iterable[StudyRow]) -> dict[str, list[StudyRow]]:
     for row in rows:
         groups[row.group_id].append(row)
     return dict(groups)
+
+
+def group_completeness_audit(
+    eligible_pool: list[StudyRow], selected: list[StudyRow]
+) -> dict[str, Any]:
+    """Verify that every selected semantic ID contains all of its eligible rows."""
+    pool_counts = Counter(row.group_id for row in eligible_pool)
+    selected_counts = Counter(row.group_id for row in selected)
+    extra = sorted(set(selected_counts) - set(pool_counts))
+    incomplete = {
+        group_id: {
+            "eligible_rows": pool_counts[group_id],
+            "selected_rows": selected_counts[group_id],
+        }
+        for group_id in selected_counts
+        if selected_counts[group_id] != pool_counts[group_id]
+    }
+    missing_rows = sum(
+        max(0, values["eligible_rows"] - values["selected_rows"])
+        for values in incomplete.values()
+    )
+    return {
+        "complete": not incomplete and not extra,
+        "selected_groups": len(selected_counts),
+        "incomplete_groups": len(incomplete),
+        "missing_rows": missing_rows,
+        "unexpected_groups": len(extra),
+        "examples": dict(list(sorted(incomplete.items()))[:10]),
+    }
 
 
 def select_complete_groups(
@@ -201,6 +235,19 @@ def select_balanced_nemotron(
             f"selected={len(selected)}, remaining_by_language={remaining}"
         )
     return selected, selected_ids
+
+
+def select_scaled_nemotron_validation(
+    rows: list[StudyRow], budget: int, *, seed: int
+) -> tuple[list[StudyRow], set[str]]:
+    """Keep validation semantic IDs whole even when an exact row quota is impossible."""
+    return select_balanced_nemotron(
+        rows,
+        budget,
+        seed=seed,
+        split="validation",
+        allow_tiny_shortfall=True,
+    )
 
 
 def language_balance(rows: list[StudyRow]) -> dict[str, Any]:
@@ -339,8 +386,8 @@ def main() -> None:
     validation_total = 1_000
     n_val = round(validation_total * ratio["nemotron"] / 100)
     w_val = validation_total - n_val
-    selected_n_val, _ = select_balanced_nemotron(
-        nemo_validation_pool, n_val, seed=args.seed, split="validation"
+    selected_n_val, _ = select_scaled_nemotron_validation(
+        nemo_validation_pool, n_val, seed=args.seed
     )
     selected_w_val, wild_val_ids = select_complete_groups(
         wild, w_val, seed=args.seed, source="wildguard", split="validation"
@@ -382,6 +429,23 @@ def main() -> None:
     selected_w_train, _ = select_complete_groups(
         wild_train_pool, w_train, seed=args.seed, source="wildguard", split="train"
     )
+
+    group_completeness = {
+        "nemotron_train": group_completeness_audit(nemo_train_pool, selected_n_train),
+        "wildguard_train": group_completeness_audit(wild_train_pool, selected_w_train),
+        "nemotron_validation": group_completeness_audit(
+            nemo_validation_pool, selected_n_val
+        ),
+        "wildguard_validation": group_completeness_audit(wild, selected_w_val),
+    }
+    failed_group_audits = [
+        name for name, audit in group_completeness.items() if not audit["complete"]
+    ]
+    if failed_group_audits:
+        raise RuntimeError(
+            "Partial semantic groups detected after selection: "
+            + ", ".join(failed_group_audits)
+        )
 
     n_balance = language_balance(selected_n_train)
     if selected_n_train and n_balance["maximum_relative_deviation"] > args.language_balance_tolerance:
@@ -426,6 +490,12 @@ def main() -> None:
             "nemotron_train": _distribution(selected_n_train),
             "wildguard_train": _distribution(selected_w_train),
         },
+        "group_completeness": group_completeness,
+        "license_note": (
+            "Contains CC-BY-4.0 Nemotron V3 derivatives and gated WildGuardMix derivatives "
+            "subject to ODC-BY and AI2 Responsible Use terms; transfer privately and do not "
+            "publish the rendered WildGuard rows in a public dataset repository."
+        ),
         "splits": splits,
     }
     (output / "manifest.json").write_text(

@@ -7,19 +7,21 @@
     "wildguard": 70
   },
   "requested_scaled_train_rows": {
-    "nemotron": 34286,
-    "wildguard": 80000
+    "nemotron": 37176,
+    "wildguard": 86745
   },
   "caps": {
     "nemotron": 420000,
-    "wildguard": 80000
+    "wildguard_raw_file_rows": 86759,
+    "wildguard_normalized_valid_rows": 86745
   },
   "validation_rows": {
     "nemotron": 300,
     "wildguard": 700
   },
   "notes": [
-    "The builder clamps to post-cleaning eligible rows and preserves complete semantic groups.",
+    "The builder requests every normalized-valid WildGuard row, then clamps to post-cleaning eligible complete prompt groups.",
+    "Nemotron selection keeps complete upstream IDs across languages and targets near-equal counts over the nine selected languages.",
     "This is the main scale arm selected from the matched 80k study; it is not a claim that the ratio is globally optimal."
   ]
 }
