@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "selection_rule": "pre-registered scale-sensitivity arm: keep the eligible WildGuard cap and fit balanced Nemotron proportionally",
+  "winner": "nemotron70_wildguard30",
+  "winner_ratio": {
+    "nemotron": 70,
+    "wildguard": 30
+  },
+  "requested_scaled_train_rows": {
+    "nemotron": 186667,
+    "wildguard": 80000
+  },
+  "caps": {
+    "nemotron": 420000,
+    "wildguard": 80000
+  },
+  "validation_rows": {
+    "nemotron": 700,
+    "wildguard": 300
+  },
+  "notes": [
+    "The builder clamps to post-cleaning eligible rows and preserves complete semantic groups.",
+    "This is a Nemo-heavy scale-sensitivity comparator, not a replacement for the 30:70 main arm."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "selection_rule": "pre-registered scale-sensitivity arm: keep the eligible WildGuard cap and fit balanced Nemotron proportionally",
+  "winner": "nemotron30_wildguard70",
+  "winner_ratio": {
+    "nemotron": 30,
+    "wildguard": 70
+  },
+  "requested_scaled_train_rows": {
+    "nemotron": 34286,
+    "wildguard": 80000
+  },
+  "caps": {
+    "nemotron": 420000,
+    "wildguard": 80000
+  },
+  "validation_rows": {
+    "nemotron": 300,
+    "wildguard": 700
+  },
+  "notes": [
+    "The builder clamps to post-cleaning eligible rows and preserves complete semantic groups.",
+    "This is the main scale arm selected from the matched 80k study; it is not a claim that the ratio is globally optimal."
+  ]
+}
