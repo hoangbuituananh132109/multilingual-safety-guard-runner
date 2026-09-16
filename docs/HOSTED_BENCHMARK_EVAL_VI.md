@@ -71,4 +71,4 @@ echo $! > logs/hosted-qwen3-235b.pid
 
 Nếu endpoint không cần trường `model`, bỏ `--model`. Không có giá trị mặc định nào gọi ra mạng; chạy thật chỉ xảy ra khi có endpoint và không dùng `--dry-run`.
 
-Kết quả gồm `predictions.jsonl`, `metrics.json`, `metrics.csv` và `run_manifest.json`. Metric có `Balanced Accuracy`, `Safe Recall`, `Unsafe Recall`, `Safe F1`, `Unsafe F1`, `Macro F1`, `Parse Rate` theo benchmark/ngôn ngữ/view và dòng `ALL`. Parse/request error được tính là dự đoán sai cho cả ground-truth safe lẫn unsafe.
+Kết quả gồm `predictions.jsonl`, `metrics.json`, `metrics.csv` và `run_manifest.json`. Metric có `Balanced Accuracy`, `Safe Recall`, `Unsafe Recall`, `Safe F1`, `Unsafe F1`, `Macro F1`, `Parse Rate`. Dùng các dòng `benchmark|ALL|ALL` để so từng benchmark; các dòng còn lại phân rã theo ngôn ngữ/view. Không dùng dòng pooled `ALL` làm kết luận chính vì benchmark lớn và prompt xuất hiện ở nhiều benchmark sẽ nhận trọng số cao hơn. Parse/request error được tính là dự đoán sai cho cả ground-truth safe lẫn unsafe.

@@ -52,6 +52,9 @@ class HostedBenchmarkEvalTests(unittest.TestCase):
         self.assertEqual(result[0]["examples"], 4)
         self.assertEqual(result[0]["balanced_accuracy"], 50.0)
         self.assertEqual(result[0]["parse_rate"], 100.0)
+        benchmark_row = next(row for row in result if row["group"] == "demo|ALL|ALL")
+        self.assertEqual(benchmark_row["examples"], 4)
+        self.assertEqual(benchmark_row["balanced_accuracy"], 50.0)
 
     def test_parse_errors_are_incorrect_for_both_ground_truth_classes(self) -> None:
         rows = [

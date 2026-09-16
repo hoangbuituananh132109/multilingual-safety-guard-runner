@@ -276,12 +276,24 @@ def _group_metric(group: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def metric_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    benchmark_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    detail_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        groups[f"{row.get('benchmark', 'unknown')}|{row.get('language', 'unknown')}|{row.get('view', 'unknown')}"].append(row)
-    result = [_group_metric(group, members) for group, members in sorted(groups.items())]
-    if result:
-        result.insert(0, _group_metric("ALL", rows))
+        benchmark = str(row.get("benchmark", "unknown"))
+        benchmark_groups[benchmark].append(row)
+        detail_groups[
+            f"{benchmark}|{row.get('language', 'unknown')}|{row.get('view', 'unknown')}"
+        ].append(row)
+    result: list[dict[str, Any]] = []
+    if rows:
+        result.append(_group_metric("ALL", rows))
+    result.extend(
+        _group_metric(f"{benchmark}|ALL|ALL", members)
+        for benchmark, members in sorted(benchmark_groups.items())
+    )
+    result.extend(
+        _group_metric(group, members) for group, members in sorted(detail_groups.items())
+    )
     return result
 
 
