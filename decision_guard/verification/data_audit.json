@@ -1,0 +1,53 @@
+{
+  "valid": true,
+  "archive_sha256": "61e43353485d1d0e3986507b2b4524a2f90afa5f42dc98c67575f8126e61ccf4",
+  "splits": {
+    "train": {
+      "examples": 274760,
+      "source:nemotron_v3_9lang": 192332,
+      "cell:P:0": 82344,
+      "language:nemotron_v3_9lang:de": 21371,
+      "cell:PR:1": 33356,
+      "language:nemotron_v3_9lang:ja": 21370,
+      "source:wildguardtrain_en": 82428,
+      "cell:PR:0": 86374,
+      "language:wildguardtrain_en:en": 82428,
+      "language:nemotron_v3_9lang:en": 21370,
+      "language:nemotron_v3_9lang:ar": 21370,
+      "language:nemotron_v3_9lang:es": 21370,
+      "cell:P:1": 72686,
+      "language:nemotron_v3_9lang:fr": 21371,
+      "language:nemotron_v3_9lang:hi": 21370,
+      "language:nemotron_v3_9lang:th": 21370,
+      "language:nemotron_v3_9lang:zh": 21370,
+      "empty_response_examples": 247
+    },
+    "validation": {
+      "examples": 1000,
+      "source:wildguardtrain_en": 300,
+      "cell:PR:1": 303,
+      "language:wildguardtrain_en:en": 300,
+      "source:nemotron_v3_9lang": 700,
+      "language:nemotron_v3_9lang:es": 78,
+      "cell:PR:0": 527,
+      "language:nemotron_v3_9lang:de": 77,
+      "cell:P:0": 83,
+      "language:nemotron_v3_9lang:ar": 78,
+      "language:nemotron_v3_9lang:en": 78,
+      "language:nemotron_v3_9lang:fr": 78,
+      "language:nemotron_v3_9lang:ja": 78,
+      "language:nemotron_v3_9lang:zh": 78,
+      "language:nemotron_v3_9lang:th": 77,
+      "cell:P:1": 87,
+      "language:nemotron_v3_9lang:hi": 78
+    }
+  },
+  "group_overlap": 0,
+  "content_overlap": 0,
+  "hashes": {
+    "train.jsonl": "9de0f098edafe174bba811be0a663af96c123031100658854b98b81c6c17338f",
+    "validation.jsonl": "7261cdb00bf1e29271d702501d9686f35fe57ba76c99f1270cc530c6959697a5",
+    "manifest.json": "7a8016bea2ec8f62acb37ff6ab3a6c96f26adc0d732a4a90b38462cec640c3e0",
+    "validation_report.json": "f60ba48c2437246dab55f10493e7b2d853c090d966f30785f849c8608aa6cd85"
+  }
+}

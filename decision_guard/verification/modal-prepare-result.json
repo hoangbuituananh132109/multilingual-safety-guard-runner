@@ -1,0 +1,11 @@
+{
+  "root": "/study/decision-guard-one-step-v1",
+  "versions": {
+    "torch": "2.13.0a0+8145d630e8.nv26.6.54250401",
+    "transformers": "5.12.1",
+    "megatron-bridge": "0.6.1",
+    "megatron-core": "0.19.1",
+    "transformer-engine": "2.18.0+15288857"
+  },
+  "model_sha256": "b6a5dbdf64bed84b9cc6b2d6d293c6e5cdd69085adccf10717d1e82f51f403c9"
+}

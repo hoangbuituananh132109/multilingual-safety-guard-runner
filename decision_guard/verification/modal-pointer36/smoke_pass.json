@@ -1,0 +1,77 @@
+{
+  "contract": {
+    "arm": "pointer36",
+    "model": "b6a5dbdf64bed84b9cc6b2d6d293c6e5cdd69085adccf10717d1e82f51f403c9",
+    "cache_sha256": "e45e517cb40d0af38cd11a2f1582f45b551159379be8f15bd0cb44691fa70804",
+    "code_sha256": "04e9f32e7aeef0b1d333a40dca27d6223318388f28ef30879c72ee395d91ba89",
+    "cache_protocol": {
+      "data": {
+        "manifest.json": "7a8016bea2ec8f62acb37ff6ab3a6c96f26adc0d732a4a90b38462cec640c3e0",
+        "train.jsonl": "9de0f098edafe174bba811be0a663af96c123031100658854b98b81c6c17338f",
+        "validation.jsonl": "7261cdb00bf1e29271d702501d9686f35fe57ba76c99f1270cc530c6959697a5",
+        "validation_report.json": "f60ba48c2437246dab55f10493e7b2d853c090d966f30785f849c8608aa6cd85"
+      },
+      "max_length": 2048,
+      "protocol_sha256": "bbba04782410a50b123121b53cb6ea609348cc0f7fb495d2c33ff7d20533a1df",
+      "tokenizer": {
+        "config.json": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
+        "merges.txt": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+        "tokenizer.json": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+        "tokenizer_config.json": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+        "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+      }
+    },
+    "environment": {
+      "torch": "2.13.0a0+8145d630e8.nv26.6.54250401",
+      "transformers": "5.12.1",
+      "megatron-bridge": "0.6.1",
+      "megatron-core": "0.19.1",
+      "transformer-engine": "2.18.0+15288857"
+    },
+    "world_size": 1,
+    "global_batch": 32,
+    "micro_batch": 1,
+    "lr": 1e-05,
+    "seed": 3407,
+    "epochs": 1,
+    "lora": {
+      "targets": [
+        "linear_q",
+        "linear_v"
+      ],
+      "rank": 8,
+      "alpha": 32,
+      "dropout": 0.05
+    },
+    "dtype": "bf16",
+    "optimizer": "AdamW_fp32_master",
+    "smoke": true
+  },
+  "steps": 1,
+  "validation": {
+    "examples": 16,
+    "loss": 0.618520952295512,
+    "accuracy": 0.625,
+    "safe_recall": 1.0,
+    "unsafe_recall": 0.0,
+    "balanced_accuracy": 0.5,
+    "tn": 10,
+    "fp": 0,
+    "fn": 6,
+    "tp": 0
+  },
+  "elapsed_seconds": 16.12192791999999,
+  "trainable_parameters": 4259840,
+  "note": "Validation split only, not held-out benchmark evaluation",
+  "final_sha256": "9b64470b26be7c239376977ae5330de8bdbc6c99f899e9f34277210881ea62c9",
+  "checkpoint_roundtrip": {
+    "passed": true,
+    "step": 1,
+    "bytes": 62489638,
+    "sha256": "9b64470b26be7c239376977ae5330de8bdbc6c99f899e9f34277210881ea62c9",
+    "trainable_tensors": 146,
+    "optimizer_restored": true,
+    "reload_scope": "same process after zeroing trainables and clearing optimizer",
+    "forward_after_reload_passed": true
+  }
+}
