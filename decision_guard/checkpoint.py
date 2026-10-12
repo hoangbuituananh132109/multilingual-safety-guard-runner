@@ -37,7 +37,8 @@ def load_checkpoint(path, model, optimizer, contract):
             raise ValueError('Backbone buffers differ')
         for name, value in state['buffers'].items():
             buffers[name].copy_(value)
-    optimizer.load_state_dict(state['optimizer'])
+    if optimizer is not None:
+        optimizer.load_state_dict(state['optimizer'])
     return state
 
 

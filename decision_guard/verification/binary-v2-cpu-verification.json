@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-12",
+  "scope": "Qwen3-4B binary36/binary18 offline Bridge workflow",
+  "cpu_tests": {"passed": 39, "failed": 0},
+  "bash_workflow_test": "real runner, expensive GPU/CLI boundaries replaced with fixtures; Linux flock not exercised on Windows",
+  "bpe_regression": "nonadditive tokenizer test failed before fix and passed after shared short-conversation tokenization",
+  "benchmark_audit": {
+    "examples": 129761,
+    "benchmarks": 12,
+    "sha256": "bdb2b4d1ecac08d2b6f4915b7a3274282dd0833f0c9f6d6f25671cbbe35f635a",
+    "schema": "id,prompt,ground_truth; all rows validated against known outer wrapper"
+  },
+  "read_only_code_review": "No remaining Critical/Important findings after tokenization correction",
+  "gpu_smoke_this_version": false,
+  "multi_gpu_runtime_verified": false,
+  "training_launched": false,
+  "benchmark_inference_launched": false,
+  "required_cluster_gate": "smoke 1 step + saved head/LoRA/optimizer reload + fresh-process checkpoint load + 96-row benchmark eval before full training",
+  "full_training_save_every": 2000,
+  "no_8b_or_pointer_in_binary_pipeline": true
+}

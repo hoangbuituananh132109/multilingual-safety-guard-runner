@@ -46,6 +46,11 @@ def planned_steps(rows, global_batch, smoke=False):
     return min(1, math.ceil(rows / global_batch)) if smoke else math.ceil(rows / global_batch)
 
 
+def training_code_hash():
+    return hashlib.sha256(''.join(sha256(Path(__file__).with_name(name)) for name in
+                          ('train.py', 'model.py', 'bridge_backend.py', 'checkpoint.py', 'protocol.py', 'data.py', 'preflight.py')).encode()).hexdigest()
+
+
 def check_smoke(certificate, contract):
     previous = certificate.get('contract', {})
     allowed_differences = {'smoke', 'cache_sha256'}
@@ -131,6 +136,7 @@ def collective_save(path, model, optimizer, contract, step):
     dist.all_gather_object(states, rng_snapshot())
     if dist.get_rank() == 0:
         save_checkpoint(path, model, optimizer, contract, step, states)
+        print(f'CHECKPOINT SAVED step={step} path={path}', flush=True)
     dist.barrier()
 
 
@@ -169,7 +175,7 @@ def main():
     parser.add_argument('--micro-batch', type=int, default=1)
     parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--seed', type=int, default=3407)
-    parser.add_argument('--save-every', type=int, default=250)
+    parser.add_argument('--save-every', type=int, default=2000)
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--smoke-certificate', type=Path)
     args = parser.parse_args()
@@ -196,8 +202,7 @@ def main():
     receipt = json.loads(args.model_receipt.read_text())
     if str(args.model.resolve()) != receipt['model_path'] or receipt['tokenizer'] != request['tokenizer']:
         raise ValueError('Local model/preflight receipt/tokenizer cache mismatch')
-    code_hash = hashlib.sha256(''.join(sha256(Path(__file__).with_name(name)) for name in
-                          ('train.py', 'model.py', 'bridge_backend.py', 'checkpoint.py', 'protocol.py', 'data.py', 'preflight.py')).encode()).hexdigest()
+    code_hash = training_code_hash()
     protocol = {k: v for k, v in request.items() if k not in ('train_limit', 'validation_limit')}
     contract = dict(arm=args.arm, model=receipt['model_sha256'], cache_sha256=sha256(args.cache / 'cache_manifest.json'),
                     code_sha256=code_hash, cache_protocol=protocol,
@@ -303,7 +308,7 @@ def main():
             model.train()
             dist.barrier()
         if rank == 0:
-            result = dict(contract=contract, steps=total_steps, validation=metrics,
+            result = dict(contract=contract, steps=total_steps, resumed_from_step=start, validation=metrics,
                           elapsed_seconds=time.monotonic() - begin,
                           trainable_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad),
                           note='Validation split only, not held-out benchmark evaluation')

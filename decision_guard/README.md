@@ -1,4 +1,13 @@
-# Qwen3-4B decision-head study — pointer36 đã smoke 1 step, chưa train đầy đủ
+# B200 binary-only v2 (2026-10-12)
+
+Hướng dẫn mới: [Qwen3-4B binary36/binary18: smoke → train → eval](../docs/DECISION_GUARD_BINARY_B200_VI.md).
+Chỉ hai arm binary, fixed NeMo26.08/Bridge, checkpoint mỗi 2000 step. CPU checks
+không thay bằng chứng GPU; runner yêu cầu smoke + checkpoint reload + eval-smoke
+trước full train. Phần hướng dẫn cũ bên dưới vẫn dành cho matrix 7 arm, không tự
+eval benchmark và không phải lệnh mới được yêu cầu. Smoke pointer36 cũ là bằng
+chứng lịch sử của phiên bản trước, không chứng minh GPU cho binary v2.
+
+# Thiết kế matrix ban đầu — pointer36 đã smoke 1 step, chưa train đầy đủ
 
 Mục tiêu: so sánh guard sinh JSON tuần tự với guard đưa ra xác suất trong một
 forward, rồi đo mức đánh đổi tốc độ/độ chính xác sau khi train. Không coi các số

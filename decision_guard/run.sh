@@ -6,8 +6,11 @@ cd "$ROOT"
 source "$ROOT/decision_guard/settings.env.sh"
 PHASE="${1:-}"
 ARM_FILTER="${2:-all}"
-case "$PHASE" in install|preflight|prepare|smoke|train|all) ;; *)
-  echo 'Usage: bash decision_guard/run.sh install|preflight|prepare|smoke|train|all [arm|all]'; exit 2;; esac
+case "$PHASE" in install|preflight|prepare|smoke|train|all|run|eval) ;; *)
+  echo 'Usage: bash decision_guard/run.sh install|preflight|prepare|smoke|train|all [arm|all] OR run|eval binary36|binary18'; exit 2;; esac
+if [[ "$PHASE" == run || "$PHASE" == eval ]]; then
+  case "$ARM_FILTER" in binary36|binary18) ;; *) echo 'ERROR: run/eval requires exactly binary36 or binary18'; exit 2;; esac
+fi
 mkdir -p "$DG_LOG_ROOT" "$DG_RUN_ROOT"
 command -v "$DG_PYTHON" >/dev/null
 command -v flock >/dev/null || { echo 'ERROR: flock missing in fixed image'; exit 1; }
@@ -65,6 +68,37 @@ run_arms() {
     printf '[%s] PASS %s %s\n' "$(date -Is)" "$mode" "$arm"
   done
 }
+eval_arm() {
+  local mode="$1" trained="$DG_RUN_ROOT/$ARM_FILTER" output="$DG_RUN_ROOT/$ARM_FILTER/eval_full"
+  local extra=()
+  if [[ "$mode" == smoke ]]; then
+    trained="$DG_RUN_ROOT/_smoke/$ARM_FILTER"
+    output="$trained/eval_smoke"
+    extra=(--limit-per-benchmark 8)
+  fi
+  mkdir -p "$DG_LOG_ROOT/$ARM_FILTER"
+  printf '[%s] START binary benchmark eval %s %s\n' "$(date -Is)" "$mode" "$ARM_FILTER"
+  "$DG_PYTHON" -m torch.distributed.run --standalone --nproc_per_node="$GPU_COUNT" \
+    -m decision_guard.evaluate --model "$DG_MODEL_PATH" --model-receipt "$DG_CACHE_ROOT/model_receipt.json" \
+    --train-run "$trained" --arm "$ARM_FILTER" --bundle "$DG_BENCHMARK" --output "$output" \
+    --max-length "$DG_EVAL_MAX_LENGTH" --batch-size "$DG_EVAL_BATCH" \
+    --max-batch-tokens "$DG_EVAL_MAX_BATCH_TOKENS" "${extra[@]}" \
+    2>&1 | tee -a "$DG_LOG_ROOT/$ARM_FILTER/eval_${mode}_${STAMP}.log"
+}
+binary_pipeline() {
+  test -f "$DG_BENCHMARK" || { echo "ERROR: missing local unified benchmark $DG_BENCHMARK"; exit 1; }
+  "$DG_PYTHON" -m decision_guard.benchmark --bundle "$DG_BENCHMARK"
+  install_data
+  preflight
+  run_arms smoke
+  # A NEW torchrun process loads checkpoint step=1 before full training.
+  run_arms smoke
+  "$DG_PYTHON" -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r["resumed_from_step"] == 1, "Fresh-process smoke checkpoint reload was not verified"' \
+    "$DG_RUN_ROOT/_smoke/$ARM_FILTER/smoke_pass.json"
+  eval_arm smoke
+  run_arms full
+  eval_arm full
+}
 case "$PHASE" in
   install) install_data ;;
   preflight) preflight ;;
@@ -72,5 +106,7 @@ case "$PHASE" in
   smoke) run_arms smoke ;;
   train) run_arms full ;;
   all) install_data; preflight; run_arms smoke; run_arms full ;;
+  run) binary_pipeline ;;
+  eval) eval_arm full ;;
 esac
 printf '[%s] COMPLETE phase=%s\n' "$(date -Is)" "$PHASE"

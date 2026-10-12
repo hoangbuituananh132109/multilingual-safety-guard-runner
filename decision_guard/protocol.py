@@ -105,12 +105,20 @@ class Encoder:
         return json.dumps({'safety': name}, separators=(',', ':')) if kind == 'json' else name
 
     def content(self, row):
+        # BPE is not additive across 'user: ' / payload boundaries. Short rows
+        # must use the same serialized tokenization as the compact benchmark.
+        serialized = 'user: ' + escape(row['prompt'])
+        if row['view'] == 'PR':
+            serialized += '\nassistant: ' + escape(row['response'])
+        complete = self.tokens(serialized)
+        if len(complete) <= self.content_budget:
+            return dict(ids=complete, truncated=False)
         user = self.tokens(escape(row['prompt']))
         header = self.tokens('user: ')
         if row['view'] == 'P':
             budget = self.content_budget - len(header)
             kept = _keep_ends(user, budget, self.gap)
-            return dict(ids=header + kept, truncated=len(kept) != len(user))
+            return dict(ids=header + kept, truncated=True)
         response = self.tokens(escape(row['response']))
         middle = self.tokens('\nassistant: ')
         budget = self.content_budget - len(header + middle)
@@ -119,7 +127,7 @@ class Encoder:
         b = min(len(response), budget - a)
         a = min(len(user), budget - b)
         return dict(ids=header + _keep_ends(user, a, self.gap) + middle +
-                    _keep_ends(response, b, self.gap), truncated=len(user) + len(response) > budget)
+                    _keep_ends(response, b, self.gap), truncated=True)
 
     def encode(self, row, kind, content=None):
         if kind not in KINDS:

@@ -13,9 +13,10 @@ def main():
     root = Path(__file__).resolve().parent.parent
     files = sorted(p for p in (root / 'decision_guard').rglob('*')
                    if p.is_file() and p.suffix in ('.py', '.sh', '.md', '.json')
-                   and '__pycache__' not in p.parts)
+                   and '__pycache__' not in p.parts and p.name != 'modal_model_catalog.json')
     files += [root / f'docs/superpowers/{folder}/2026-10-11-decision-guard-bridge.md'
               for folder in ('specs', 'plans')]
+    files.append(root / 'docs/DECISION_GUARD_BINARY_B200_VI.md')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.output.exists():
         raise FileExistsError('Choose a new package filename, do not overwrite a transferred bundle')
